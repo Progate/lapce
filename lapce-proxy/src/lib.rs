@@ -3,7 +3,16 @@
 pub mod buffer;
 pub mod cli;
 pub mod dispatch;
+#[cfg(not(target_os = "wasi"))]
+mod git;
+#[cfg(target_os = "wasi")]
+mod git_wasi;
+#[cfg(target_os = "wasi")]
+mod inotify_wasi;
+#[cfg(target_os = "wasi")]
+pub mod wasi_process;
 pub mod plugin;
+#[cfg(not(target_os = "wasi"))]
 pub mod terminal;
 pub mod watcher;
 
@@ -159,6 +168,14 @@ pub fn register_lapce_path() -> Result<()> {
     Ok(())
 }
 
+/// WASI（preview1）に Unix ドメインソケットは無い。2 つ目の Lapce は
+/// 前のものへ繋がず、自分で窓を開く
+#[cfg(target_os = "wasi")]
+fn listen_local_socket(_proxy_rpc: ProxyRpcHandler) -> Result<()> {
+    Err(anyhow!("local sockets are not available on WASI"))
+}
+
+#[cfg(not(target_os = "wasi"))]
 fn listen_local_socket(proxy_rpc: ProxyRpcHandler) -> Result<()> {
     let local_socket = Directory::local_socket()
         .ok_or_else(|| anyhow!("can't get local socket folder"))?;
@@ -186,6 +203,97 @@ fn listen_local_socket(proxy_rpc: ProxyRpcHandler) -> Result<()> {
     Ok(())
 }
 
+/// プラグインの取得や更新の確認に使う。WASI 版はまだ HTTP を持たないので、
+/// 必ず失敗する（→ [`wasi_http::Response`]）
+#[cfg(target_os = "wasi")]
+pub fn get_url<T: std::fmt::Display>(
+    url: T,
+    _user_agent: Option<&str>,
+) -> Result<wasi_http::Response> {
+    Err(anyhow!("cannot fetch {url} on WASI yet"))
+}
+
+/// reqwest の `Response` のうち、Lapce が使うところだけを持つ型。
+/// **値は作られない**（`get_url` が必ず失敗する）ので、中身は空の enum にしてある
+#[cfg(target_os = "wasi")]
+pub mod wasi_http {
+    use anyhow::Result;
+
+    pub enum Response {}
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct StatusCode(pub u16);
+
+    impl StatusCode {
+        pub fn is_success(&self) -> bool {
+            (200..300).contains(&self.0)
+        }
+    }
+
+    impl PartialEq<u16> for StatusCode {
+        fn eq(&self, other: &u16) -> bool {
+            self.0 == *other
+        }
+    }
+
+    impl std::fmt::Display for StatusCode {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+
+    impl Response {
+        pub fn status(&self) -> StatusCode {
+            match *self {}
+        }
+
+        pub fn text(self) -> Result<String> {
+            match self {}
+        }
+
+        pub fn bytes(self) -> Result<Vec<u8>> {
+            match self {}
+        }
+
+        pub fn json<T: serde::de::DeserializeOwned>(self) -> Result<T> {
+            match self {}
+        }
+
+        pub fn copy_to<W: std::io::Write + ?Sized>(&mut self, _out: &mut W) -> Result<u64> {
+            match *self {}
+        }
+    }
+
+    impl std::io::Read for Response {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            match *self {}
+        }
+    }
+
+    impl Response {
+        pub fn headers(&self) -> &Headers {
+            match *self {}
+        }
+    }
+
+    pub enum Headers {}
+
+    impl Headers {
+        pub fn get(&self, _name: &str) -> Option<&HeaderValue> {
+            match *self {}
+        }
+    }
+
+    pub enum HeaderValue {}
+
+    impl HeaderValue {
+        pub fn to_str(&self) -> Result<&str> {
+            match *self {}
+        }
+    }
+}
+
+#[cfg(not(target_os = "wasi"))]
 pub fn get_url<T: reqwest::IntoUrl + Clone>(
     url: T,
     user_agent: Option<&str>,

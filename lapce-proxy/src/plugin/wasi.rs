@@ -29,7 +29,9 @@ use lsp_types::{
 use parking_lot::Mutex;
 use psp_types::{Notification, Request};
 use serde_json::Value;
+#[cfg(not(target_os = "wasi"))]
 use wasi_experimental_http_wasmtime::{HttpCtx, HttpState};
+#[cfg(not(target_os = "wasi"))]
 use wasmtime_wasi::WasiCtxBuilder;
 
 use super::{
@@ -413,6 +415,19 @@ pub fn enable_volt(
     Ok(())
 }
 
+/// プラグインは WASI のモジュールで、ネイティブ版は wasmtime で動かしている。
+/// Lapce 自身が wasm の中に居るときは wasmtime を持ち込めないので、まだ起動できない
+#[cfg(target_os = "wasi")]
+pub fn start_volt(
+    _workspace: Option<PathBuf>,
+    _configurations: Option<HashMap<String, serde_json::Value>>,
+    _plugin_rpc: PluginCatalogRpcHandler,
+    meta: VoltMetadata,
+) -> Result<()> {
+    Err(anyhow!("plugin {} cannot run on WASI yet", meta.name))
+}
+
+#[cfg(not(target_os = "wasi"))]
 pub fn start_volt(
     workspace: Option<PathBuf>,
     configurations: Option<HashMap<String, serde_json::Value>>,

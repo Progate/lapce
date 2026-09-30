@@ -77,6 +77,12 @@ pub fn parse_file_line_column(path: &str) -> Result<PathObject, Error> {
     })
 }
 
+#[cfg(target_os = "wasi")]
+pub fn try_open_in_existing_process(_paths: &[PathObject]) -> Result<()> {
+    Err(anyhow!("local sockets are not available on WASI"))
+}
+
+#[cfg(not(target_os = "wasi"))]
 pub fn try_open_in_existing_process(paths: &[PathObject]) -> Result<()> {
     let local_socket = Directory::local_socket()
         .ok_or_else(|| anyhow!("can't get local socket folder"))?;
