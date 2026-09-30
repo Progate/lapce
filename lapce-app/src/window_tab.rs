@@ -10,6 +10,8 @@ use std::{
     time::Instant,
 };
 
+#[cfg(target_os = "wasi")]
+use crate::open_wasi as open;
 use alacritty_terminal::vte::ansi::Handler;
 use floem::{
     ViewId,

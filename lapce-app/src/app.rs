@@ -3760,6 +3760,8 @@ pub fn launch() {
     }
 
     let stdin = std::io::stdin();
+    // シェルを起動して環境変数を取り込む。WASI の std は子プロセスを起動できない
+    #[cfg(not(target_os = "wasi"))]
     if !stdin.is_terminal() {
         trace!(TraceLevel::INFO, "Loading custom environment from shell");
         load_shell_env();
@@ -3767,6 +3769,10 @@ pub fn launch() {
 
     // small hack to unblock terminal if launched from it
     // launch it as a separate process that waits
+    //
+    // WASI の std は子プロセスを起動できないので、自分を起動し直さずにこのまま窓を開く
+    // （端末を塞ぎたくなければ、シェルの `&` で背後へ回す）
+    #[cfg(not(target_os = "wasi"))]
     if !cli.wait {
         let mut args = std::env::args().collect::<Vec<_>>();
         args.push("--wait".to_string());
@@ -4104,6 +4110,27 @@ pub fn load_shell_env() {
         })
 }
 
+/// WASI（preview1）に Unix ドメインソケットは無い。既に開いている Lapce へは繋がず、
+/// 毎回自分で窓を開く
+#[cfg(target_os = "wasi")]
+pub fn get_socket() -> Result<std::convert::Infallible> {
+    Err(anyhow!("local sockets are not available on WASI"))
+}
+
+#[cfg(target_os = "wasi")]
+pub fn try_open_in_existing_process(
+    socket: std::convert::Infallible,
+    _paths: &[PathObject],
+) -> Result<()> {
+    match socket {}
+}
+
+#[cfg(target_os = "wasi")]
+fn listen_local_socket(_tx: SyncSender<CoreNotification>) -> Result<()> {
+    Err(anyhow!("local sockets are not available on WASI"))
+}
+
+#[cfg(not(target_os = "wasi"))]
 pub fn get_socket() -> Result<interprocess::local_socket::LocalSocketStream> {
     let local_socket = Directory::local_socket()
         .ok_or_else(|| anyhow!("can't get local socket folder"))?;
@@ -4112,6 +4139,7 @@ pub fn get_socket() -> Result<interprocess::local_socket::LocalSocketStream> {
     Ok(socket)
 }
 
+#[cfg(not(target_os = "wasi"))]
 pub fn try_open_in_existing_process(
     mut socket: interprocess::local_socket::LocalSocketStream,
     paths: &[PathObject],
@@ -4140,6 +4168,7 @@ pub fn try_open_in_existing_process(
     Ok(())
 }
 
+#[cfg(not(target_os = "wasi"))]
 fn listen_local_socket(tx: SyncSender<CoreNotification>) -> Result<()> {
     let local_socket = Directory::local_socket()
         .ok_or_else(|| anyhow!("can't get local socket folder"))?;

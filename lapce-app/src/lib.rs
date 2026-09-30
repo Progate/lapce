@@ -1,4 +1,6 @@
 pub mod about;
+#[cfg(target_os = "wasi")]
+mod open_wasi;
 pub mod alert;
 pub mod app;
 pub mod code_action;

@@ -85,6 +85,17 @@ pub fn download_release(release: &ReleaseInfo) -> Result<PathBuf> {
     Err(anyhow!("can't download release"))
 }
 
+/// BrowserOS の中の Lapce は OS が配った wasm で、自分を差し替えられない
+#[cfg(target_os = "wasi")]
+pub fn extract(_src: &Path, _process_path: &Path) -> Result<PathBuf> {
+    Err(anyhow!("Lapce cannot update itself on WASI"))
+}
+
+#[cfg(target_os = "wasi")]
+pub fn restart(_path: &Path) -> Result<()> {
+    Err(anyhow!("Lapce cannot update itself on WASI"))
+}
+
 #[cfg(target_os = "macos")]
 pub fn extract(src: &Path, process_path: &Path) -> Result<PathBuf> {
     let info = dmg::Attach::new(src).with()?;

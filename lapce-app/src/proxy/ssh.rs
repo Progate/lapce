@@ -11,7 +11,7 @@ pub struct SshRemote {
 }
 
 impl SshRemote {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "wasi"))]
     const SSH_ARGS: &'static [&'static str] = &[];
 
     #[cfg(unix)]
