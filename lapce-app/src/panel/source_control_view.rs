@@ -11,7 +11,11 @@ use floem::{
     style::{CursorStyle, Style},
     views::{
         Decorators, container, dyn_stack,
-        editor::view::{LineRegion, cursor_caret},
+        editor::{
+            WrapProp,
+            text::WrapMethod,
+            view::{LineRegion, cursor_caret},
+        },
         label, scroll, stack, svg, text,
     },
 };
@@ -57,17 +61,31 @@ pub fn source_control_panel(
         doc.buffer.with(|b| b.len() == 0)
     });
     let debug_breakline = create_memo(move |_| None);
+    // コミットのメッセージ欄の幅（→ 下の `WrapProp`）
+    let box_width = create_rw_signal(0.0_f64);
 
     stack((
         stack((
             container({
                 scroll({
                     let view = stack((
+                        /*
+                         * **欄の幅で折り返す。** 既定（`EditorWidth`）はエディタから見えている
+                         * 範囲で折り返すが、スクロールの中身は中身の幅に縮むので、それが
+                         * 「いまの中身 + 余白」になる。1 文字が余白より広い文字（日本語など）は
+                         * 打つたびに次の行へ回り、1 文字ずつ改行したように見えていた
+                         */
                         editor_view(
                             editor.get_untracked(),
                             debug_breakline,
                             is_active,
-                        ),
+                        )
+                        .style(move |s| {
+                            let width = box_width.get() as f32 - 30.0;
+                            s.apply_if(width > 0.0, |s| {
+                                s.set(WrapProp, WrapMethod::WrapWidth { width })
+                            })
+                        }),
                         label(|| "Commit Message".to_string()).style(move |s| {
                             let config = config.get();
                             s.absolute()
@@ -114,6 +132,9 @@ pub fn source_control_panel(
                 })
                 .on_scroll(move |rect| {
                     viewport.set(rect);
+                })
+                .on_resize(move |rect| {
+                    box_width.set(rect.width());
                 })
                 .ensure_visible(move || {
                     let cursor = cursor.get();
