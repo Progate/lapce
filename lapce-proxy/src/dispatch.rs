@@ -52,6 +52,8 @@ use crate::git_wasi::{
 };
 #[cfg(not(target_os = "wasi"))]
 use crate::terminal::{Terminal, TerminalSender};
+#[cfg(target_os = "wasi")]
+use crate::terminal_wasi::{TerminalMessage, TerminalSender};
 use crate::{
     buffer::{Buffer, get_mod_time, load_file},
     plugin::{PluginCatalogRpcHandler, catalog::PluginCatalog},
@@ -67,7 +69,6 @@ pub struct Dispatcher {
     core_rpc: CoreRpcHandler,
     catalog_rpc: PluginCatalogRpcHandler,
     buffers: HashMap<PathBuf, Buffer>,
-    #[cfg(not(target_os = "wasi"))]
     terminals: HashMap<TermId, TerminalSender>,
     file_watcher: FileWatcher,
     window_id: usize,
@@ -173,9 +174,11 @@ impl ProxyHandler for Dispatcher {
             }
             Shutdown {} => {
                 self.catalog_rpc.shutdown();
-                #[cfg(not(target_os = "wasi"))]
                 for (_, sender) in self.terminals.iter() {
+                    #[cfg(not(target_os = "wasi"))]
                     sender.send(Msg::Shutdown);
+                    #[cfg(target_os = "wasi")]
+                    sender.send(TerminalMessage::Shutdown);
                 }
                 self.proxy_rpc.shutdown();
             }
@@ -196,16 +199,35 @@ impl ProxyHandler for Dispatcher {
                     tracing::error!("{:?}", err);
                 }
             }
-            // 端末（pty）は WASI 版にはまだ無い。開けなかったことを伝え、残りは読み捨てる
+            // BrowserOS の pty の上でシェルを動かす（→ terminal_wasi.rs）
             #[cfg(target_os = "wasi")]
-            NewTerminal { term_id, .. } => {
-                self.core_rpc.terminal_launch_failed(
-                    term_id,
-                    "the terminal is not available in this build of Lapce".to_string(),
-                );
+            NewTerminal { term_id, profile } => {
+                match crate::terminal_wasi::start(term_id, profile, 50, 10, self.core_rpc.clone()) {
+                    Ok((sender, pid)) => {
+                        self.core_rpc.terminal_process_id(term_id, Some(pid));
+                        self.terminals.insert(term_id, sender);
+                    }
+                    Err(e) => self.core_rpc.terminal_launch_failed(term_id, e.to_string()),
+                }
             }
             #[cfg(target_os = "wasi")]
-            TerminalWrite { .. } | TerminalResize { .. } | TerminalClose { .. } => {}
+            TerminalWrite { term_id, content } => {
+                if let Some(tx) = self.terminals.get(&term_id) {
+                    tx.send(TerminalMessage::Input(content.into_bytes()));
+                }
+            }
+            #[cfg(target_os = "wasi")]
+            TerminalResize { term_id, width, height } => {
+                if let Some(tx) = self.terminals.get(&term_id) {
+                    tx.send(TerminalMessage::Resize { rows: height as u16, cols: width as u16 });
+                }
+            }
+            #[cfg(target_os = "wasi")]
+            TerminalClose { term_id } => {
+                if let Some(tx) = self.terminals.remove(&term_id) {
+                    tx.send(TerminalMessage::Shutdown);
+                }
+            }
             #[cfg(not(target_os = "wasi"))]
             NewTerminal { term_id, profile } => {
                 let mut terminal = match Terminal::new(term_id, profile, 50, 10) {
@@ -1249,7 +1271,6 @@ impl Dispatcher {
             core_rpc,
             catalog_rpc: plugin_rpc,
             buffers: HashMap::new(),
-            #[cfg(not(target_os = "wasi"))]
             terminals: HashMap::new(),
             file_watcher,
             window_id: 1,

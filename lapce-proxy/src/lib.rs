@@ -14,6 +14,8 @@ pub mod wasi_process;
 pub mod plugin;
 #[cfg(not(target_os = "wasi"))]
 pub mod terminal;
+#[cfg(target_os = "wasi")]
+pub mod terminal_wasi;
 pub mod watcher;
 
 use std::{

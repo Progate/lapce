@@ -33,6 +33,18 @@ unsafe extern "C" {
         fds: *mut u32,
         pid: *mut u32,
     ) -> i32;
+    #[link_name = "posix_spawn_tty"]
+    fn host_posix_spawn_tty(
+        argv: *const u8,
+        argv_len: usize,
+        env: *const u8,
+        env_len: usize,
+        cwd: *const u8,
+        cwd_len: usize,
+        tty: *const u8,
+        tty_len: usize,
+        pid: *mut u32,
+    ) -> i32;
     #[link_name = "waitpid"]
     fn host_waitpid(pid: u32, status: *mut u32, options: i32) -> i32;
 }
@@ -167,4 +179,48 @@ pub fn output(argv: &[&str], cwd: &Path, input: Option<&[u8]>) -> io::Result<Out
     let code = ((status >> 8) & 0xff) as i32;
     tracing::debug!("{argv:?} exited with {code}");
     Ok(Output { code, stdout: out, stderr: err })
+}
+
+/// 子を端末（pty の子の側、`/dev/pts/N`）の上で起動する。0/1/2 がその端末になる
+pub fn spawn_on_tty(
+    argv: &[&str],
+    env: &[(String, String)],
+    cwd: &Path,
+    tty: &str,
+) -> io::Result<u32> {
+    let argv_bytes = nul_joined(argv.iter().copied());
+    let env: Vec<String> = env.iter().map(|(key, value)| format!("{key}={value}")).collect();
+    let env_bytes = nul_joined(env.iter().map(String::as_str));
+    let cwd = cwd.to_string_lossy();
+    let mut pid = 0u32;
+    let errno = unsafe {
+        host_posix_spawn_tty(
+            argv_bytes.as_ptr(),
+            argv_bytes.len(),
+            env_bytes.as_ptr(),
+            env_bytes.len(),
+            cwd.as_ptr(),
+            cwd.len(),
+            tty.as_ptr(),
+            tty.len(),
+            &mut pid,
+        )
+    };
+    if errno != 0 {
+        return Err(io::Error::other(format!(
+            "posix_spawn_tty {} on {tty} failed (errno {errno})",
+            argv.first().copied().unwrap_or("")
+        )));
+    }
+    Ok(pid)
+}
+
+/// 終わっていれば終了コード。まだなら `None`（待たない）
+pub fn try_wait(pid: u32) -> io::Result<Option<i32>> {
+    let mut status = 0u32;
+    match unsafe { host_waitpid(pid, &mut status, WNOHANG) } {
+        0 => Ok(Some(((status >> 8) & 0xff) as i32)),
+        ERRNO_AGAIN => Ok(None),
+        errno => Err(io::Error::other(format!("waitpid failed (errno {errno})"))),
+    }
 }
