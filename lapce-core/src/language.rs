@@ -1828,6 +1828,14 @@ impl LapceLanguage {
 
         // Try reading highlights from user config dir
         if let Some(queries_dir) = Directory::queries_directory() {
+            // WASI 版は文法を組み込んでいるので、定義もその文法の crate に同梱されたものを使う。
+            // lapce/tree-sitter-grammars の定義は別の版の文法向けで、ノード名が合わない
+            #[cfg(target_os = "wasi")]
+            if !queries_dir.join(&query_name).exists() {
+                if let Some(queries) = builtin_grammar_query(&query_name) {
+                    return queries;
+                }
+            }
             return (
                 read_grammar_query(
                     &queries_dir,
@@ -1874,6 +1882,56 @@ impl LapceLanguage {
     }
 }
 
+/// WASI には共有ライブラリを読み込む仕組み（dlopen）が無いので、文法は wasm に
+/// 静的に組み込んである（→ Cargo.toml の `tree-sitter-*`）。探す記号の名前は
+/// ネイティブ版が dlsym で探すものと同じ `tree_sitter_<name>` である
+#[cfg(target_os = "wasi")]
+fn load_grammar(
+    grammar_name: &str,
+    grammar_fn_name: &str,
+    _path: &Path,
+) -> Result<tree_sitter::Language, HighlightIssue> {
+    // 各 crate の中の C の関数。Rust の API（tree-sitter の別の版の型を返す）は使わない
+    unsafe extern "C" {
+        fn tree_sitter_bash() -> tree_sitter::Language;
+        fn tree_sitter_c() -> tree_sitter::Language;
+        fn tree_sitter_css() -> tree_sitter::Language;
+        fn tree_sitter_html() -> tree_sitter::Language;
+        fn tree_sitter_javascript() -> tree_sitter::Language;
+        fn tree_sitter_json() -> tree_sitter::Language;
+        fn tree_sitter_python() -> tree_sitter::Language;
+        fn tree_sitter_rust() -> tree_sitter::Language;
+        fn tree_sitter_toml() -> tree_sitter::Language;
+        fn tree_sitter_tsx() -> tree_sitter::Language;
+        fn tree_sitter_typescript() -> tree_sitter::Language;
+        fn tree_sitter_yaml() -> tree_sitter::Language;
+    }
+    let language = unsafe {
+        match grammar_fn_name.replace('-', "_").as_str() {
+            "bash" => tree_sitter_bash(),
+            "c" => tree_sitter_c(),
+            "css" => tree_sitter_css(),
+            "html" => tree_sitter_html(),
+            "javascript" => tree_sitter_javascript(),
+            "json" => tree_sitter_json(),
+            "python" => tree_sitter_python(),
+            "rust" => tree_sitter_rust(),
+            "toml" => tree_sitter_toml(),
+            "tsx" => tree_sitter_tsx(),
+            "typescript" => tree_sitter_typescript(),
+            "yaml" => tree_sitter_yaml(),
+            _ => {
+                event!(Level::WARN, "Grammar {grammar_name} is not built into this WASI build");
+                return Err(HighlightIssue::Error(format!(
+                    "grammar {grammar_name} is not built into this build of Lapce"
+                )));
+            }
+        }
+    };
+    Ok(language)
+}
+
+#[cfg(not(target_os = "wasi"))]
 fn load_grammar(
     grammar_name: &str,
     grammar_fn_name: &str,
@@ -2029,6 +2087,39 @@ pub(crate) fn walk_tree_bracket_ast(
         }
         cursor.goto_parent();
     }
+}
+
+/// 組み込んだ文法（→ `load_grammar`）に同梱されているハイライトと差し込みの定義。
+/// TypeScript は JavaScript の定義を継ぎ足して使う前提で書かれている（nvim-treesitter の
+/// `inherits: ecma` と同じ）ので、固有のものを先に、共通のものを後ろに重ねる
+#[cfg(target_os = "wasi")]
+fn builtin_grammar_query(query_name: &str) -> Option<(String, String)> {
+    let join = |parts: &[&str]| parts.join("\n");
+    let js = tree_sitter_javascript::HIGHLIGHT_QUERY;
+    let jsx = tree_sitter_javascript::JSX_HIGHLIGHT_QUERY;
+    let js_injections = tree_sitter_javascript::INJECTIONS_QUERY;
+    let ts = tree_sitter_typescript::HIGHLIGHTS_QUERY;
+    Some(match query_name {
+        "bash" => (tree_sitter_bash::HIGHLIGHT_QUERY.to_owned(), String::new()),
+        "c" => (tree_sitter_c::HIGHLIGHT_QUERY.to_owned(), String::new()),
+        "css" => (tree_sitter_css::HIGHLIGHTS_QUERY.to_owned(), String::new()),
+        "html" => (
+            tree_sitter_html::HIGHLIGHTS_QUERY.to_owned(),
+            tree_sitter_html::INJECTIONS_QUERY.to_owned(),
+        ),
+        "javascript" | "jsx" => (join(&[jsx, js]), js_injections.to_owned()),
+        "json" => (tree_sitter_json::HIGHLIGHTS_QUERY.to_owned(), String::new()),
+        "python" => (tree_sitter_python::HIGHLIGHTS_QUERY.to_owned(), String::new()),
+        "rust" => (
+            tree_sitter_rust::HIGHLIGHTS_QUERY.to_owned(),
+            tree_sitter_rust::INJECTIONS_QUERY.to_owned(),
+        ),
+        "toml" => (tree_sitter_toml_ng::HIGHLIGHTS_QUERY.to_owned(), String::new()),
+        "typescript" => (join(&[ts, js]), js_injections.to_owned()),
+        "tsx" => (join(&[ts, jsx, js]), js_injections.to_owned()),
+        "yaml" => (tree_sitter_yaml::HIGHLIGHTS_QUERY.to_owned(), String::new()),
+        _ => return None,
+    })
 }
 
 fn read_grammar_query(queries_dir: &Path, name: &str, kind: &str) -> String {

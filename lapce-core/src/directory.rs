@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+#[cfg(target_os = "wasi")]
+use crate::xdg::{BaseDirs, ProjectDirs};
+#[cfg(not(target_os = "wasi"))]
 use directories::{BaseDirs, ProjectDirs};
 
 use crate::meta::NAME;

@@ -22,7 +22,6 @@ lapce-xi-rope     = { workspace = true }
 lapce-rpc         = { workspace = true }
 floem-editor-core = { workspace = true }
 
-libloading  = "0.8.1"
 slotmap     = "1.0"
 arc-swap    = "1.6.0"
 tree-sitter = "0.22.6"
@@ -41,3 +40,24 @@ anyhow = { workspace = true }
 
 [target.'cfg(not(target_os = "linux"))'.build-dependencies]
 git2   = { workspace = true }
+
+# WASI（BrowserOS）では動かないもの。文法（tree-sitter）の動的読み込み。代わりの経路は src の `#[cfg(target_os = "wasi")]` を見よ
+[target.'cfg(not(target_os = "wasi"))'.dependencies]
+libloading  = "0.8.1"
+
+# WASI には dlopen が無いので、文法は静的に組み込む（→ src/language.rs の `load_grammar`）。
+# 使うのは C の関数（`tree_sitter_<name>`）と同梱のハイライトの定義だけで、`LANGUAGE`
+# （tree-sitter の別の版の型）は使わない。どれも ABI 14 で
+# 生成された版に留めてある（Lapce の tree-sitter 0.22 が読めるのは 13 と 14）
+[target.'cfg(target_os = "wasi")'.dependencies]
+tree-sitter-bash       = "=0.23.3"
+tree-sitter-c          = "=0.23.4"
+tree-sitter-css        = "=0.23.2"
+tree-sitter-html       = "=0.23.2"
+tree-sitter-javascript = "=0.23.1"
+tree-sitter-json       = "=0.24.8"
+tree-sitter-python     = "=0.23.6"
+tree-sitter-rust       = "=0.23.3"
+tree-sitter-toml-ng    = "=0.7.0"
+tree-sitter-typescript = "=0.23.2"
+tree-sitter-yaml       = "=0.7.2"
