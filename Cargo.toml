@@ -89,6 +89,8 @@ features = ["serde"]
 [patch.crates-io]
 # WASI を wasm32-unknown-unknown と同じ「何も無い」扱いにしていて、時刻を読むと panic する
 filetime = { path = "wasip1/crates/filetime" }
+# wasm では nightly の feature が無いと、ロックが競合した時点で panic する（→ wasip1/README.md）
+parking_lot_core = { path = "wasip1/crates/parking_lot_core" }
 # Temporarily patch lsp-types with a version that adds message-type debug
 lsp-types = { git = "https://github.com/lapce/lsp-types", rev = "feaa1e2ec80975c9dadd400a238ceacf071058e6" }
 regalloc2 = { rev = "5d79e12d0a93b10fc181f4da409b4671dd365228", git = "https://github.com/bytecodealliance/regalloc2" }

@@ -54,7 +54,8 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
 | winit | rust-windowing/winit `ee245c56` | `platform_impl/wasi`（windowserver の窓） |
 | floem | lapce/floem `31fa8f44` | GPU の代役・tiny-skia へ画素を渡す口・書体の読み込み（mmap を使わない）と代わりの書体の一覧・プロセス内のクリップボード |
 | alacritty_terminal | alacritty/alacritty `cacdb5bb` | WASI では pty と event_loop を外す（格子と vte はそのまま使う） |
+| parking_lot_core | crates.io 0.9.11 | wasm の待ちは nightly の feature でしか本物にならず、ロックが競合すると panic していたので、std の park / unpark（futex）で待つ実装を足した |
 | filetime | crates.io 0.2.26 | WASI を「何も無い wasm」と同じに扱っていて時刻を読むと panic していたので、std の API で実装した |
 
 ライセンスは各ディレクトリの LICENSE のとおり（winit・alacritty_terminal は Apache-2.0、floem は MIT、
-filetime は MIT OR Apache-2.0）。
+filetime と parking_lot_core は MIT OR Apache-2.0）。
