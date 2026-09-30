@@ -63,6 +63,25 @@ pub(crate) fn scale_factor() -> f64 {
         .unwrap_or(1.0)
 }
 
+/// `WINIT_WASI_TRACE=1` のとき、入力から描き上がりまでの時間を標準エラーへ出す
+pub(crate) fn trace_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("WINIT_WASI_TRACE").is_ok_and(|value| value == "1"))
+}
+
+static INPUT_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// 最初に届いてまだ描かれていない入力の時刻を覚える
+pub(crate) fn note_input() {
+    if trace_enabled() {
+        INPUT_AT.lock().unwrap().get_or_insert_with(std::time::Instant::now);
+    }
+}
+
+pub(crate) fn take_input_instant() -> Option<std::time::Instant> {
+    INPUT_AT.lock().unwrap().take()
+}
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct MonitorHandle;
 

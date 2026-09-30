@@ -33,6 +33,8 @@ const POLL_INTERVAL: Duration = Duration::from_millis(4);
 
 #[derive(Default)]
 struct WindowState {
+    /// 押したと伝えたキー（evdev の番号）。**離したことは、押したと伝えたキーにだけ伝える**
+    pressed_keys: std::collections::HashSet<u16>,
     modifiers: ModifiersState,
     pressed: ModifiersKeys,
     pointer: Option<(f64, f64)>,
@@ -107,6 +109,9 @@ impl EventLoop {
     ) {
         let window_id = shared.id();
         let emit = |app: &mut A, event| app.window_event(target, window_id, event);
+        if matches!(message, ServerMessage::Scroll { .. } | ServerMessage::Key { .. } | ServerMessage::Pointer { .. }) {
+            super::note_input();
+        }
         match message {
             ServerMessage::Surface { .. } => {},
             ServerMessage::Configure { width, height } => {
@@ -195,6 +200,17 @@ impl EventLoop {
         emit: &mut dyn FnMut(event::WindowEvent),
     ) {
         let pressed = key_state != KeyState::Up;
+        /*
+         * **押したと伝えていないキーの「離した」は捨てる。** IME が握ったキー（確定の Enter
+         * など）はブラウザーが keydown を IME へ渡すので、こちらには keyup だけが届く。
+         * それをそのまま伝えると、受け取った側が Enter として扱って改行が入る。
+         * ネイティブの macOS 版 winit も、IME が握ったキーの離した出来事は送らない
+         */
+        if pressed {
+            state.pressed_keys.insert(code);
+        } else if !state.pressed_keys.remove(&code) {
+            return;
+        }
         let info = keymap::lookup(code);
         let physical_key = match &info {
             Some(info) => PhysicalKey::Code(info.code),
@@ -315,7 +331,10 @@ impl EventLoop {
             let mut index = 0;
             while index < self.windows.len() {
                 let shared = self.windows[index].0.clone();
-                let messages = shared.connection.poll();
+                let messages = coalesce_scrolls(shared.connection.poll());
+                if super::trace_enabled() && messages.len() > 1 {
+                    eprintln!("[winit-wasi] {} messages in one poll", messages.len());
+                }
                 for message in messages {
                     let state = &mut self.windows[index].1;
                     Self::process_message(&shared, state, message, &self.window_target, &mut app);
@@ -401,6 +420,29 @@ impl EventLoop {
     pub fn window_target(&self) -> &dyn RootActiveEventLoop {
         &self.window_target
     }
+}
+
+/// 続けて届いた巻き上げを 1 つにまとめる。
+///
+/// 描いているあいだに届いたぶんを 1 つずつ描くと、指を止めたあとも画面が遅れて動き続ける。
+/// 量は足し合わせるので、巻いた距離は変わらない（ブラウザーが wheel をまとめるのと同じ）
+fn coalesce_scrolls(messages: Vec<ServerMessage>) -> Vec<ServerMessage> {
+    let mut out: Vec<ServerMessage> = Vec::with_capacity(messages.len());
+    for message in messages {
+        if let (
+            Some(ServerMessage::Scroll { x: last_x, y: last_y, delta_x: last_dx, delta_y: last_dy }),
+            ServerMessage::Scroll { x, y, delta_x, delta_y },
+        ) = (out.last_mut(), &message)
+        {
+            *last_x = *x;
+            *last_y = *y;
+            *last_dx += delta_x;
+            *last_dy += delta_y;
+            continue;
+        }
+        out.push(message);
+    }
+    out
 }
 
 pub struct EventLoopProxy {

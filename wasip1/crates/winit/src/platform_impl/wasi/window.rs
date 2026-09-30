@@ -85,6 +85,7 @@ impl Window {
     /// 前に出したものと比べて、**変わった行だけ**をファイルへ書く。エディタのカーソルの
     /// 点滅のように数行しか変わらないフレームで、画面全体を書き直さずに済む
     pub fn present(&self, rgba: &[u8], width: u32, height: u32) {
+        let started = std::time::Instant::now();
         let stride = width as usize * 4;
         if stride == 0 || rgba.len() < stride * height as usize {
             return;
@@ -113,6 +114,14 @@ impl Window {
             top as u32,
             (bottom - top) as u32,
         );
+        if super::trace_enabled() {
+            let since_input = super::take_input_instant().map(|at| at.elapsed().as_millis());
+            eprintln!(
+                "[winit-wasi] present rows {top}..{bottom} took {}ms, {}ms after input",
+                started.elapsed().as_millis(),
+                since_input.map_or("-".to_owned(), |ms| ms.to_string()),
+            );
+        }
         if last.len() != rgba.len() {
             last.clear();
             last.extend_from_slice(rgba);

@@ -185,10 +185,17 @@ impl Connection {
         let mut early = Vec::new();
         loop {
             read_available(&mut socket, &mut pending)?;
-            for line in take_lines(&mut pending) {
+            let mut lines = take_lines(&mut pending).into_iter();
+            while let Some(line) = lines.next() {
                 match parse_line(&line) {
                     Some(ServerMessage::Surface { id, path, width, height }) => {
                         let pixels = OpenOptions::new().write(true).open(&path)?;
+                        /*
+                         * **同じ読みに入っていた後ろの行を捨てない。** 係は `surface` の直後に
+                         * `configure`（画面いっぱいの大きさ）を送ってくる。ここで落とすと、
+                         * 窓は画面の大きさなのに、要求した大きさのまま描き続ける
+                         */
+                        early.extend(lines);
                         let connection = Self {
                             socket: Mutex::new(socket),
                             pending: Mutex::new(early_bytes(&early, &pending)),
@@ -291,12 +298,12 @@ fn read_available(socket: &mut File, pending: &mut Vec<u8>) -> io::Result<bool> 
                     Err(io::Error::new(io::ErrorKind::UnexpectedEof, "window server closed"))
                 };
             },
+            // **短く読めても続けて読む。** BrowserOS のソケットは書かれた単位（係の 1 行）で
+            // 返すことがあり、ここで止めると 1 回に 1 行しか取れない。すると巻き上げの行が
+            // 1 コマに 1 つずつしか処理されず、巻くのを止めても画面が動き続ける
             Ok(count) => {
                 pending.extend_from_slice(&buffer[..count]);
                 any = true;
-                if count < buffer.len() {
-                    return Ok(true);
-                }
             },
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(any),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
