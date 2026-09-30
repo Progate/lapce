@@ -21,6 +21,8 @@ path = "lapce-proxy/src/bin/lapce-proxy.rs"
 
 [workspace]
 members = ["lapce-app", "lapce-proxy", "lapce-rpc", "lapce-core"]
+# WASI（BrowserOS）で動かすために手を入れた依存。それぞれ自分のワークスペースを持つ（→ wasip1/README.md）
+exclude = ["wasip1/crates"]
 
 [workspace.package]
 version      = "0.4.6"
@@ -77,25 +79,27 @@ lapce-rpc   = { path = "./lapce-rpc" }
 lapce-proxy = { path = "./lapce-proxy" }
 
 [workspace.dependencies.floem]
-# path = "../floem"
-git = "https://github.com/lapce/floem"
-rev = "31fa8f444c37f4c314f47d88c23ffdbc25f2ab53"
+path = "./wasip1/crates/floem"
 features = ["editor", "serde", "default-image-formats", "rfd-async-std"]
 
 [workspace.dependencies.floem-editor-core]
-# path = "../floem/editor-core/"
-git = "https://github.com/lapce/floem"
-rev = "31fa8f444c37f4c314f47d88c23ffdbc25f2ab53"
+path = "./wasip1/crates/floem/editor-core/"
 features = ["serde"]
 
 [patch.crates-io]
+# WASI を wasm32-unknown-unknown と同じ「何も無い」扱いにしていて、時刻を読むと panic する
+filetime = { path = "wasip1/crates/filetime" }
 # Temporarily patch lsp-types with a version that adds message-type debug
 lsp-types = { git = "https://github.com/lapce/lsp-types", rev = "feaa1e2ec80975c9dadd400a238ceacf071058e6" }
 regalloc2 = { rev = "5d79e12d0a93b10fc181f4da409b4671dd365228", git = "https://github.com/bytecodealliance/regalloc2" }
 
 # cargo vendor issue: https://github.com/rust-lang/cargo/issues/10310
 # dpi comes from winit (source) and muda (crate)
-dpi = { git = "https://github.com/rust-windowing/winit", rev = "ee245c569d65fdeacf705ee5eedb564508d10ebe" }
+dpi = { path = "./wasip1/crates/winit/dpi" }
+
+[patch."https://github.com/rust-windowing/winit"]
+winit = { path = "./wasip1/crates/winit" }
+dpi = { path = "./wasip1/crates/winit/dpi" }
 
 
 [workspace.dependencies.tracing]
@@ -119,8 +123,7 @@ rev     = "908cc432a5994f6e17c8f36e13c217dc40085704"
 package = "tracing-appender"
 
 [workspace.dependencies.alacritty_terminal]
-git = "https://github.com/alacritty/alacritty"
-rev = "cacdb5bb3b72bad2c729227537979d95af75978f"
+path = "./wasip1/crates/alacritty_terminal"
 
 [workspace.dependencies.windows-sys]
 version  = "0"

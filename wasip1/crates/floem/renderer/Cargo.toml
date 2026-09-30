@@ -1,0 +1,32 @@
+[package]
+name = "floem_renderer"
+version.workspace = true
+edition = "2021"
+repository = "https://github.com/lapce/floem"
+description = "A native Rust UI library with fine-grained reactivity"
+license.workspace = true
+
+[dependencies]
+parking_lot = { workspace = true }
+peniko = { workspace = true }
+resvg = { workspace = true }
+swash = { workspace = true }
+
+cosmic-text = { version = "0.14.2", features = ["shape-run-cache"] }
+
+winit = { workspace = true }
+crossbeam = { version = "0.8", optional = true }
+futures = "0.3.31"
+
+[target.'cfg(not(target_os = "wasi"))'.dependencies]
+wgpu = { workspace = true }
+
+[target.'cfg(target_os = "wasi")'.dependencies]
+# cosmic-text の `Fallback` の引数の型（→ src/text/wasi_fallback.rs）
+unicode-script = "0.5.5"
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+wasm-bindgen-futures = { version = "0.4" }
+
+[features]
+crossbeam = [ "dep:crossbeam" ]
