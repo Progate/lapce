@@ -40,7 +40,7 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
 | `directories` | Linux と同じ XDG の置き場（`lapce-core/src/xdg.rs`） |
 | ゴミ箱（trash） | freedesktop.org のゴミ箱（`~/.local/share/Trash`）へ自分で移す |
 | プラグイン（wasmtime） | 未対応（起動しようとすると理由付きで失敗する） |
-| 端末（pty） | 未対応（パネルに理由を出す） |
+| 端末（pty と epoll の event_loop） | BrowserOS の pty（`browser_os_pty` の `openpty`）の上で `posix_spawn_tty` でシェルを起動する（`lapce-proxy/src/terminal_wasi.rs`） |
 | HTTP（プラグインの取得・更新の確認） | 未対応 |
 | 単一起動の IPC | 無し（毎回自分で窓を開く） |
 
