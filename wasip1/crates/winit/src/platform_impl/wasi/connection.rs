@@ -23,7 +23,8 @@ pub(super) enum ServerMessage {
     Surface { id: u32, path: String, width: u32, height: u32 },
     Configure { width: u32, height: u32 },
     Focus { focused: bool },
-    Pointer { phase: PointerPhase, x: f64, y: f64 },
+    /// `button` は X と同じ番号（1 左・2 中・3 右）。動いただけの知らせは 0
+    Pointer { phase: PointerPhase, x: f64, y: f64, button: u32 },
     Scroll { x: f64, y: f64, delta_x: f64, delta_y: f64 },
     Key { state: KeyState, code: u16 },
     Text { text: String },
@@ -104,6 +105,8 @@ pub(super) fn parse_line(line: &str) -> Option<ServerMessage> {
             },
             x: number(1)?,
             y: number(2)?,
+            // ボタンの欄は後から足された。無い行（古い windowserver）は左とみなす
+            button: integer(3).unwrap_or(1),
         },
         "scroll" => ServerMessage::Scroll {
             x: number(0)?,
@@ -347,7 +350,11 @@ mod tests {
         );
         assert_eq!(
             parse_line("pointer 3 down 10 20"),
-            Some(ServerMessage::Pointer { phase: PointerPhase::Down, x: 10.0, y: 20.0 })
+            Some(ServerMessage::Pointer { phase: PointerPhase::Down, x: 10.0, y: 20.0, button: 1 })
+        );
+        assert_eq!(
+            parse_line("pointer 3 down 10 20 3 110 120"),
+            Some(ServerMessage::Pointer { phase: PointerPhase::Down, x: 10.0, y: 20.0, button: 3 })
         );
         assert_eq!(
             parse_line("text 3 %E3%81%82"),

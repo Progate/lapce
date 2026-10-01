@@ -123,7 +123,7 @@ impl EventLoop {
                 *shared.focused.lock().unwrap() = focused;
                 emit(app, event::WindowEvent::Focused(focused));
             },
-            ServerMessage::Pointer { phase, x, y } => {
+            ServerMessage::Pointer { phase, x, y, button } => {
                 let position = dpi::PhysicalPosition::new(x, y);
                 if state.pointer.is_none() {
                     emit(app, event::WindowEvent::PointerEntered {
@@ -156,7 +156,12 @@ impl EventLoop {
                             primary: true,
                             state: button_state,
                             position,
-                            button: event::MouseButton::Left.into(),
+                            button: match button {
+                                2 => event::MouseButton::Middle,
+                                3 => event::MouseButton::Right,
+                                _ => event::MouseButton::Left,
+                            }
+                            .into(),
                         });
                     }
                 }

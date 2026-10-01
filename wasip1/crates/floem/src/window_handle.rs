@@ -19,11 +19,11 @@ use winit::{
     window::{CursorIcon, Window, WindowId},
 };
 
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "wasi"))]
 use crate::reactive::SignalWith;
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "wasi"))]
 use crate::unit::UnitExt;
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "wasi"))]
 use crate::views::{container, stack};
 use crate::{
     app::UserEvent,
@@ -80,7 +80,7 @@ pub(crate) struct WindowHandle {
     pub(crate) cursor_position: Point,
     pub(crate) window_position: Point,
     pub(crate) last_pointer_down: Option<(u8, Point, Instant)>,
-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "wasi"))]
     pub(crate) context_menu: RwSignal<Option<(Menu, Point, bool)>>,
     dropper_file: Option<PathBuf>,
 }
@@ -107,17 +107,17 @@ impl WindowHandle {
 
         set_current_view(id);
 
-        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "wasi"))]
         let context_menu = scope.create_rw_signal(None);
 
-        #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+        #[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "wasi")))]
         let view = with_scope(scope, move || {
             let main_view = view_fn(window_id);
             let main_view_id = main_view.id();
             (main_view_id, main_view)
         });
 
-        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "wasi"))]
         let view = with_scope(scope, move || {
             let main_view = view_fn(window_id);
             let main_view_id = main_view.id();
@@ -202,7 +202,7 @@ impl WindowHandle {
             modifiers: Modifiers::default(),
             cursor_position: Point::ZERO,
             window_position: Point::ZERO,
-            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "wasi"))]
             context_menu,
             last_pointer_down: None,
             dropper_file: None,
@@ -416,7 +416,7 @@ impl WindowHandle {
                 }
             }
 
-            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "wasi"))]
             if self.context_menu.with_untracked(|c| {
                 c.as_ref()
                     .map(|(_, _, had_pointer_down)| !*had_pointer_down)
@@ -1045,7 +1045,7 @@ impl WindowHandle {
                             let platform_menu = menu.platform_menu();
                             self.show_context_menu(platform_menu, pos);
                         }
-                        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+                        #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "wasi"))]
                         self.show_context_menu(menu, pos);
                     }
                     UpdateMessage::WindowMenu { menu } => {
@@ -1276,7 +1276,7 @@ impl WindowHandle {
         }
     }
 
-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "wasi"))]
     fn show_context_menu(&self, menu: Menu, pos: Option<Point>) {
         let pos = pos.unwrap_or(self.cursor_position);
         let pos = Point::new(pos.x / self.app_state.scale, pos.y / self.app_state.scale);
@@ -1338,7 +1338,7 @@ pub(crate) fn set_current_view(id: ViewId) {
     });
 }
 
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "wasi"))]
 fn context_menu_view(
     cx: Scope,
     context_menu: RwSignal<Option<(Menu, Point, bool)>>,
