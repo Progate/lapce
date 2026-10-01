@@ -3725,6 +3725,15 @@ fn window(window_data: WindowData) -> impl View {
 }
 
 pub fn launch() {
+    /*
+     * WASI の作業ディレクトリは wasi-libc がプロセスの中で持っていて、起動時は `/` である。
+     * BrowserOS は起動した場所を PWD で渡すので、引数の相対パスを解く前にそこへ移る
+     */
+    #[cfg(target_os = "wasi")]
+    if let Some(pwd) = std::env::var_os("PWD") {
+        let _ = std::env::set_current_dir(pwd);
+    }
+
     let cli = Cli::parse();
 
     if !cli.wait {
@@ -3901,7 +3910,24 @@ pub fn launch() {
         plugin_paths,
     };
 
-    let app = app_data.create_windows(db.clone(), cli.paths);
+    /*
+     * WASI にはフォルダーを選ぶ画面が無い（rfd は None を返す）ので、何も渡されずに起動すると
+     * 「Open Folder」から先へ進めない。起動した場所（デスクトップから開けばホーム）を開く
+     */
+    #[cfg(target_os = "wasi")]
+    let paths = if cli.paths.is_empty() {
+        std::env::current_dir()
+            .ok()
+            .filter(|dir| dir.is_dir())
+            .map(|dir| vec![PathObject::from_path(dir, true)])
+            .unwrap_or_default()
+    } else {
+        cli.paths
+    };
+    #[cfg(not(target_os = "wasi"))]
+    let paths = cli.paths;
+
+    let app = app_data.create_windows(db.clone(), paths);
 
     {
         let app_data = app_data.clone();
