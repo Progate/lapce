@@ -19,3 +19,19 @@ impl WindowExtWasi for dyn Window + '_ {
         }
     }
 }
+
+/// 貼り付け板（windowserver の selection）。
+///
+/// 中身は焦点のある窓へ届いたものを控えてあり、同期で読める。置くと焦点のある窓から
+/// windowserver へ渡る（ホストと繋がっていれば、ブラウザーの外の貼り付け板にも出る）
+pub mod clipboard {
+    /// 控えている中身
+    pub fn contents() -> String {
+        crate::platform_impl::clipboard::contents()
+    }
+
+    /// 中身を置く
+    pub fn set_contents(text: &str) {
+        crate::platform_impl::clipboard::set_contents(text)
+    }
+}

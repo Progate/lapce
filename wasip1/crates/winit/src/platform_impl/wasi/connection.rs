@@ -29,6 +29,8 @@ pub(super) enum ServerMessage {
     Key { state: KeyState, code: u16 },
     Text { text: String },
     Preedit { text: String },
+    /// 貼り付け板の中身（中身が変わったときと、焦点が来たときに届く）
+    Selection { text: String },
     Close,
 }
 
@@ -126,6 +128,9 @@ pub(super) fn parse_line(line: &str) -> Option<ServerMessage> {
         "text" => ServerMessage::Text { text: decode_text(rest.first().copied().unwrap_or("")) },
         "preedit" => {
             ServerMessage::Preedit { text: decode_text(rest.first().copied().unwrap_or("")) }
+        },
+        "selection" => {
+            ServerMessage::Selection { text: decode_text(rest.first().copied().unwrap_or("")) }
         },
         "close" => ServerMessage::Close,
         _ => return None,

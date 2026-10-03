@@ -57,12 +57,12 @@ impl Clipboard {
         *CLIPBOARD.lock() = Some(Self::new(display));
     }
 
-    /// WASI には窓の外と共有するクリップボードが無い。**同じプロセスの中だけ**で
-    /// 写して貼れるようにする（X11 の選択と同じで、持ち主が居なくなれば消える）
+    /// WASI では windowserver の貼り付け板を使う（→ winit の `platform::wasi::clipboard`）。
+    /// 中身は焦点のある窓へ届いたものを winit が控えているので、同期で読める
     #[cfg(target_os = "wasi")]
     pub(crate) fn init_in_process() {
         *CLIPBOARD.lock() = Some(Self {
-            clipboard: Box::new(InProcessClipboard::default()),
+            clipboard: Box::new(WindowServerClipboard),
             selection: None,
         });
     }
@@ -115,20 +115,19 @@ impl Clipboard {
 }
 
 #[cfg(target_os = "wasi")]
-#[derive(Default)]
-struct InProcessClipboard(String);
+struct WindowServerClipboard;
 
 #[cfg(target_os = "wasi")]
-impl ClipboardProvider for InProcessClipboard {
+impl ClipboardProvider for WindowServerClipboard {
     fn get_contents(&mut self) -> Result<String, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        Ok(self.0.clone())
+        Ok(winit::platform::wasi::clipboard::contents())
     }
 
     fn set_contents(
         &mut self,
         contents: String,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-        self.0 = contents;
+        winit::platform::wasi::clipboard::set_contents(&contents);
         Ok(())
     }
 }

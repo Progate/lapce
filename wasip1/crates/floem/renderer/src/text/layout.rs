@@ -36,6 +36,7 @@ pub static FONT_SYSTEM: LazyLock<Mutex<FontSystem>> = LazyLock::new(|| {
             dirs.push(std::path::Path::new(&home).join(".local/share/fonts"));
         }
         load_font_dirs_wasi(font_system.db_mut(), dirs);
+        add_upright_italics(font_system.db_mut());
     }
     #[cfg(target_os = "macos")]
     font_system.db_mut().set_sans_serif_family("Helvetica Neue");
@@ -83,6 +84,31 @@ fn load_font_dirs_wasi(db: &mut cosmic_text::fontdb::Database, mut dirs: Vec<std
                 _ => {}
             }
         }
+    }
+}
+
+/// 斜体を持たない書体を、斜体としても登録する（字形は正体のまま）。
+///
+/// cosmic-text は斜体の文字に**斜体の書体しか候補にしない**（`Attrs::matches` が
+/// style の一致を見る）。日本語の書体（Noto Sans JP）には斜体が無いので、斜体で描く
+/// 文字（Lapce のタブの名前など）の日本語が 1 字も見つからず豆腐になっていた。
+/// fontconfig のある系では、斜体の無い書体は正体を斜めにして使われるのと同じ扱いにする
+#[cfg(target_os = "wasi")]
+fn add_upright_italics(db: &mut cosmic_text::fontdb::Database) {
+    use cosmic_text::fontdb::Style;
+    let slanted: std::collections::HashSet<String> = db
+        .faces()
+        .filter(|face| face.style != Style::Normal)
+        .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
+        .collect();
+    let copies: Vec<_> = db
+        .faces()
+        .filter(|face| face.style == Style::Normal)
+        .filter(|face| face.families.first().is_some_and(|(name, _)| !slanted.contains(name)))
+        .map(|face| cosmic_text::fontdb::FaceInfo { style: Style::Italic, ..face.clone() })
+        .collect();
+    for face in copies {
+        db.push_face_info(face);
     }
 }
 

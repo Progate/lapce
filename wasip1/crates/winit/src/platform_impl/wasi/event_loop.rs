@@ -101,7 +101,7 @@ impl EventLoop {
     }
 
     fn process_message<A: ApplicationHandler>(
-        shared: &Shared,
+        shared: &Arc<Shared>,
         state: &mut WindowState,
         message: ServerMessage,
         target: &ActiveEventLoop,
@@ -121,6 +121,7 @@ impl EventLoop {
             },
             ServerMessage::Focus { focused } => {
                 *shared.focused.lock().unwrap() = focused;
+                super::clipboard::note_focus(shared, focused);
                 emit(app, event::WindowEvent::Focused(focused));
             },
             ServerMessage::Pointer { phase, x, y, button } => {
@@ -194,6 +195,7 @@ impl EventLoop {
                 let cursor = if text.is_empty() { None } else { Some((text.len(), text.len())) };
                 emit(app, event::WindowEvent::Ime(Ime::Preedit(text, cursor)));
             },
+            ServerMessage::Selection { text } => super::clipboard::note_selection(text),
             ServerMessage::Close => emit(app, event::WindowEvent::CloseRequested),
         }
     }

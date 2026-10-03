@@ -13,7 +13,7 @@
 //!   surface <w> <h>                  窓をください（0 0 なら画面いっぱい）
 //!   ◀ surface <id> <path> <w> <h>    画素はこのファイルへ
 //!   commit <id> <y> <height>         この行を書き換えた
-//!   ◀ configure / focus / pointer / scroll / key / text / preedit / close
+//!   ◀ configure / focus / pointer / scroll / key / text / preedit / selection / close
 //! ```
 //!
 //! 形は Redox の orbital と同じで、**窓 1 つにつき接続 1 本**にしている。接続が切れると
@@ -35,6 +35,7 @@ use crate::dpi::PhysicalPosition;
 use crate::keyboard::Key;
 use crate::monitor::VideoMode;
 
+pub mod clipboard;
 mod connection;
 mod event_loop;
 mod keymap;
