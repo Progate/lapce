@@ -2,8 +2,9 @@
 //!
 //! ネイティブ版は alacritty_terminal の pty と event_loop（epoll / kqueue）を使うが、
 //! WASI にはどちらも無い。BrowserOS は pty を `browser_os_pty` のホスト関数として持ち
-//! （`openpty` / `set_winsize`）、子プロセスをその端末の上で起動する
-//! `posix_spawn_tty` を `browser_os_process` に持っている。
+//! （`openpty` / `set_winsize`）、子プロセスは本物と同じ形の `posix_spawnp` で起こせる。
+//! Linux と同じく `POSIX_SPAWN_SETSID` で新しいセッションを作り、端末を 0 / 1 / 2 に開くと、
+//! それが子の制御端末になる（→ wasi_process.rs の `spawn_on_tty`）。
 //!
 //! 画面側（lapce-app）はネイティブ版と同じで、ここが送るのは端末へ書かれたバイト列
 //! （`update_terminal`）と、子の pid と終了コードだけである。
