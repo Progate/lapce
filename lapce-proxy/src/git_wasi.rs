@@ -1,7 +1,7 @@
 //! WASI（BrowserOS）のソース管理。**`git` コマンドを子プロセスとして呼ぶ。**
 //!
 //! ネイティブ版は libgit2 を静的にリンクしている（→ `git.rs`）。BrowserOS には
-//! 本物の git（`/usr/bin/git`）が居て、子プロセスは `posix_spawn` で起動できる
+//! 本物の git（`/usr/bin/git`）が居て、子プロセスは `posix_spawnp` で起動できる
 //! （→ `wasi_process.rs`）ので、ここは VS Code と同じく CLI を呼ぶ形にする。
 //! 関数の名前と意味は `git.rs` と揃えてある
 
