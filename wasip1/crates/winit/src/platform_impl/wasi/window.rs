@@ -257,9 +257,26 @@ impl CoreWindow for Window {
 
     fn set_window_icon(&self, _window_icon: Option<crate::icon::Icon>) {}
 
-    fn set_ime_cursor_area(&self, _position: Position, _size: Size) {}
+    /// 文字を打つ場所を windowserver へ言う（`cursor <id> x y w h`。Wayland の
+    /// `zwp_text_input_v3.set_cursor_rectangle`）。ホストはそこへ隠し入力を動かし、IME の
+    /// 候補をその下に出す。
+    ///
+    /// **`size` は使わず、`position` に高さ 1 の四角を置く。** floem / Lapce は行の下端を
+    /// `position` に、候補を出してよい広さ（800×600）を `size` に渡してくる。そのまま
+    /// 四角にすると、候補は 600 下へ押し出される
+    fn set_ime_cursor_area(&self, position: Position, _size: Size) {
+        let position: PhysicalPosition<i32> = position.to_physical(self.scale_factor());
+        let id = self.shared.connection.id;
+        self.shared.connection.send(&format!("cursor {id} {} {} 1 1", position.x, position.y));
+    }
 
-    fn set_ime_allowed(&self, _allowed: bool) {}
+    /// 打てなくなったら、打つ場所も無いと言う（候補を出す場所を残さない）
+    fn set_ime_allowed(&self, allowed: bool) {
+        if !allowed {
+            let id = self.shared.connection.id;
+            self.shared.connection.send(&format!("cursor {id}"));
+        }
+    }
 
     fn set_ime_purpose(&self, _purpose: ImePurpose) {}
 
