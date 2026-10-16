@@ -138,12 +138,16 @@ pub(super) fn parse_line(line: &str) -> Option<ServerMessage> {
 }
 
 /// `DISPLAY` を `/dev/tcp/<host>/<port>` にする
-fn display_path() -> String {
+/// `DISPLAY`（`host:port.screen`。X の `host:display.screen` と同じ形）を割り、繋ぎ先と既定の画面を返す。
+/// `.screen` を省けば画面 0
+fn display_target() -> (String, u32) {
     let display = std::env::var("DISPLAY").unwrap_or_else(|_| DEFAULT_DISPLAY.to_owned());
-    let (host, port) = display.rsplit_once(':').unwrap_or(("", "6000"));
+    let (host, rest) = display.rsplit_once(':').unwrap_or(("", "6000"));
     let host = if host.is_empty() { "127.0.0.1" } else { host };
+    let (port, screen) = rest.split_once('.').unwrap_or((rest, "0"));
     let port: u16 = port.parse().unwrap_or(6000);
-    format!("/dev/tcp/{host}/{port}")
+    let screen: u32 = screen.parse().unwrap_or(0);
+    (format!("/dev/tcp/{host}/{port}"), screen)
 }
 
 fn set_nonblocking(file: &File) -> io::Result<()> {
@@ -178,7 +182,7 @@ impl std::fmt::Debug for Connection {
 impl Connection {
     /// 繋いで窓を 1 つもらう。返事（`surface`）が来るまでここで待つ
     pub(super) fn open(width: u32, height: u32) -> io::Result<(Self, u32, u32)> {
-        let path = display_path();
+        let (path, screen) = display_target();
         let mut socket = OpenOptions::new().read(true).write(true).open(&path).map_err(|error| {
             io::Error::new(
                 error.kind(),
@@ -186,7 +190,13 @@ impl Connection {
             )
         })?;
         set_nonblocking(&socket)?;
-        socket.write_all(format!("surface {width} {height}\n").as_bytes())?;
+        // 置く画面を言う（X の CreateWindow の親をその画面のルート窓にするのと同じ）。画面 0 は言わない
+        let request = if screen == 0 {
+            format!("surface {width} {height}\n")
+        } else {
+            format!("surface {width} {height} screen={screen}\n")
+        };
+        socket.write_all(request.as_bytes())?;
 
         let started = Instant::now();
         let mut pending = Vec::new();
