@@ -10,6 +10,8 @@ mod git_wasi;
 #[cfg(target_os = "wasi")]
 mod inotify_wasi;
 #[cfg(target_os = "wasi")]
+mod linux_wasi;
+#[cfg(target_os = "wasi")]
 pub mod wasi_process;
 pub mod plugin;
 #[cfg(not(target_os = "wasi"))]

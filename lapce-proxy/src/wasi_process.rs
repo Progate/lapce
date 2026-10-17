@@ -1,63 +1,58 @@
 //! 子プロセス（WASI・BrowserOS）。
 //!
-//! WASI preview1 に `fork` / `exec` は無く、std の `Command` も使えない。BrowserOS は
-//! その穴を `browser_os_process` という名前空間のホスト関数で埋めている——POSIX の
-//! `pipe(2)` / `posix_spawnp(3)` / `waitpid(2)` と同じ形と意味で、子は親の 0 / 1 / 2 を継ぎ、
-//! file actions（`dup2` / `open` / `chdir`）がそれを組み替える（→ browser-os の README
-//! 「本物と同じ形で起こす」）。ここは std の `Command` が Unix でしていることを、それで書く。
+//! WASI preview1 に `fork` / `exec` は無く、std の `Command` も使えない。BrowserOS は Linux の syscall を
+//! 1 つの口で受けている（→ linux_wasi.rs）ので、std の `Command` が Linux でしていることを、それで書く:
+//! `pipe2(2)` でパイプを作り、`clone(2)` を `CLONE_VM | CLONE_VFORK` で呼び、子の段で `setsid(2)`・
+//! `dup3(2)`・`close(2)`・`openat(2)`・`chdir(2)` を当ててから `execve(2)` し、`waitid(2)` で待つ。
+//!
+//! wasm は 1 本のスタックで 2 つの流れを走らせられないので、子の段は BrowserOS が clone の中で、この
+//! モジュールの export `__browseros_clone_child_return` を呼び直して走らせる。子の段で execve が通るか
+//! exit を呼ぶと syscall が 0 で戻る（Linux では戻らない）ので、そこで戻る。clone は親に子の pid を返す。
 //!
 //! ## 止まらずに待つ
 //!
 //! Lapce は wasi-threads で動いていて、全スレッドの syscall を 1 本のホスト役が順に
-//! 捌く。パイプの blocking read や `waitpid` で止まると、**ほかのスレッド（画面を
+//! 捌く。パイプの blocking read や待つ syscall で止まると、**ほかのスレッド（画面を
 //! 描くスレッドも）の syscall まで止まる**。だからこちらの持つパイプの端は `O_NONBLOCK` にし、
-//! `waitpid` は `WNOHANG` で聞き、待つのは futex（syscall を出さない）で行う
+//! `waitid` は `WNOHANG` で聞き、待つのは futex（syscall を出さない）で行う
 
 use std::{
     fs::File,
     io::{self, Read, Write},
     os::fd::{AsRawFd, FromRawFd},
     path::Path,
+    sync::{
+        Mutex,
+        atomic::{AtomicPtr, Ordering},
+    },
     time::Duration,
 };
 
-#[link(wasm_import_module = "browser_os_process")]
-unsafe extern "C" {
-    #[link_name = "pipe2"]
-    fn host_pipe2(fds: *mut i32, flags: u32) -> i32;
-    #[link_name = "posix_spawnp"]
-    fn host_posix_spawnp(
-        pid: *mut u32,
-        file: *const u8,
-        file_len: usize,
-        actions: *const u8,
-        actions_len: usize,
-        attr: *const u8,
-        attr_len: usize,
-        argv: *const u8,
-        argv_len: usize,
-        envp: *const u8,
-        envp_len: usize,
-    ) -> i32;
-    #[link_name = "waitpid"]
-    fn host_waitpid(pid: u32, status: *mut u32, options: i32) -> i32;
-}
+use crate::linux_wasi::{
+    self, AT_FDCWD, EACCES, ENOENT, ENOTDIR, O_RDONLY, O_RDWR, SYS_CHDIR, SYS_CLONE,
+    SYS_CLOSE, SYS_DUP3, SYS_EXECVE, SYS_EXIT, SYS_FCNTL64, SYS_OPENAT, SYS_PIPE2,
+    SYS_SETSID, SYS_WAITID, address, raw,
+};
 
-const WNOHANG: i32 = 1;
-/// preview1 の errno（`EAGAIN`）
-const ERRNO_AGAIN: i32 = 6;
-
-/// file actions の種類（browser-os の process/wasi-spawn.ts の `SPAWN_FILE_ACTION_*`）
-const ACTION_OPEN: u32 = 1;
-const ACTION_CLOSE: u32 = 2;
-const ACTION_DUP2: u32 = 3;
-const ACTION_CHDIR: u32 = 4;
-/// `addopen` の oflag（wasi-libc の fcntl.h と同じ値）
-const O_RDONLY: u32 = 0x0400_0000;
-const O_WRONLY: u32 = 0x1000_0000;
-const O_RDWR: u32 = O_RDONLY | O_WRONLY;
-/// `posix_spawnattr_setflags` の `POSIX_SPAWN_SETSID`（glibc の spawn.h と同じ値）
-const POSIX_SPAWN_SETSID: u32 = 0x80;
+/// clone(2) の flags（vfork の形）と fcntl(2) の命令
+const CLONE_VM: i64 = 0x100;
+const CLONE_VFORK: i64 = 0x4000;
+const SIGCHLD: i64 = 17;
+const F_GETFD: i64 = 1;
+const F_SETFD: i64 = 2;
+const FD_CLOEXEC: i64 = 1;
+/// waitid(2) の idtype・options と、`siginfo_t` の欄（riscv32 の Linux）
+const P_PID: i64 = 1;
+const WNOHANG: i64 = 1;
+const WEXITED: i64 = 4;
+const SIGINFO_BYTES: usize = 128;
+const SIGINFO_CODE: usize = 8;
+const SIGINFO_PID: usize = 12;
+const SIGINFO_STATUS: usize = 20;
+const CLD_KILLED: i32 = 2;
+const CLD_DUMPED: i32 = 3;
+/// `PATH` が無いときに探す場所
+const DEFAULT_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 /// 0 / 1 / 2 を組み替える間だけ使う、子の中の仮の番号（最後に閉じる）
 const SCRATCH_FD: i32 = 100;
 
@@ -74,93 +69,209 @@ impl Output {
     }
 }
 
-fn nul_joined<'a>(items: impl IntoIterator<Item = &'a str>) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    for item in items {
-        bytes.extend_from_slice(item.as_bytes());
-        bytes.push(0);
-    }
-    bytes
+/// 子の段で行うこと 1 件（`posix_spawn` の attr と file actions に当たる）
+enum Action {
+    /// `setsid(2)`。新しいセッションの頭になる（その後に開いた端末が制御端末になる）
+    Setsid,
+    /// `dup2(from, to)`
+    Dup2(i32, i32),
+    /// `close(fd)`
+    Close(i32),
+    /// `open(path, oflag)` を `fd` に置く（NUL で終わるパス）
+    Open(i32, Vec<u8>, i64),
+    /// `chdir(path)`（NUL で終わるパス）
+    Chdir(Vec<u8>),
 }
 
-/// `posix_spawn_file_actions_t`。子が起動する前に fd に対して行うことを、並べた順に持つ
-#[derive(Default)]
-struct FileActions(Vec<u8>);
-
-impl FileActions {
-    fn add(&mut self, op: u32, fd: i32, newfd: i32, oflag: u32, path: &str) {
-        for value in [op, fd as u32, newfd as u32, oflag, 0, path.len() as u32] {
-            self.0.extend_from_slice(&value.to_le_bytes());
-        }
-        self.0.extend_from_slice(path.as_bytes());
-        // 次の件は 4 バイト境界から
-        while self.0.len() % 4 != 0 {
-            self.0.push(0);
-        }
-    }
-
-    fn dup2(&mut self, fd: i32, newfd: i32) {
-        self.add(ACTION_DUP2, fd, newfd, 0, "");
-    }
-
-    fn close(&mut self, fd: i32) {
-        self.add(ACTION_CLOSE, fd, 0, 0, "");
-    }
-
-    fn open(&mut self, fd: i32, path: &str, oflag: u32) {
-        self.add(ACTION_OPEN, fd, 0, oflag, path);
-    }
-
-    /// 作業ディレクトリ。cwd の持ち主は libc なので、こちらが渡す（カーネルはゲストの `chdir` を知らない）
-    fn chdir(&mut self, path: &str) {
-        self.add(ACTION_CHDIR, 0, 0, 0, path);
-    }
+/// 子の段で使うもの。clone を呼ぶ前に揃えておき、子の入口はここを読むだけにする（子の段ではヒープを使わない）
+struct ChildPlan {
+    /// 順に execve を試すパス（NUL で終わる）
+    candidates: Vec<Vec<u8>>,
+    argv: Vec<u32>,
+    envp: Vec<u32>,
+    actions: Vec<Action>,
+    /// 子の段で失敗したときの Linux の errno（0 なら起こせた）
+    error: i32,
 }
 
-/// `posix_spawnp(3)`。`argv[0]` を呼んだ側の `PATH` で探し、環境はこちらのものをそのまま渡す（exec と同じ）
-fn spawn(
-    argv: &[&str],
-    env: &[String],
-    actions: &FileActions,
-    attr_flags: u32,
-) -> io::Result<u32> {
-    let file = argv.first().copied().unwrap_or("");
-    let argv_bytes = nul_joined(argv.iter().copied());
-    let env_bytes = nul_joined(env.iter().map(String::as_str));
-    let attr = attr_flags.to_le_bytes();
-    let attr_len = if attr_flags == 0 { 0 } else { attr.len() };
-    let mut pid = 0u32;
-    let errno = unsafe {
-        host_posix_spawnp(
-            &mut pid,
-            file.as_ptr(),
-            file.len(),
-            actions.0.as_ptr(),
-            actions.0.len(),
-            attr.as_ptr(),
-            attr_len,
-            argv_bytes.as_ptr(),
-            argv_bytes.len(),
-            env_bytes.as_ptr(),
-            env_bytes.len(),
-        )
+/// いま子の段にある起動（clone を呼んでいるあいだだけ指す）
+static PLAN: AtomicPtr<ChildPlan> = AtomicPtr::new(std::ptr::null_mut());
+/// PLAN を 1 度に 1 つの起動だけが使うようにする（スレッドどうし）
+static SPAWNING: Mutex<()> = Mutex::new(());
+
+/// clone(2) の vfork の形の子の入口。BrowserOS は clone を呼んだスレッドの上で、このインスタンスに入り直して
+/// これを呼ぶ。attr と file actions を当ててから、候補のパスを順に execve する（execvp(3) と同じ）。子の段が
+/// 終わったら（execve が通るか exit を呼んだら）syscall は 0 で戻るので、そこで戻る
+#[unsafe(no_mangle)]
+pub extern "C" fn __browseros_clone_child_return() {
+    let plan = PLAN.load(Ordering::Acquire);
+    if plan.is_null() {
+        return;
+    }
+    // SAFETY: clone を呼んでいるあいだだけ PLAN が指し、子の段はそのあいだに走る
+    let plan = unsafe { &mut *plan };
+    for action in &plan.actions {
+        let r = match action {
+            Action::Setsid => raw(SYS_SETSID, [0; 6]),
+            // 同じ番号なら close-on-exec を落とす（POSIX.1-2024 の posix_spawn_file_actions_adddup2）
+            Action::Dup2(from, to) if from == to => {
+                match raw(SYS_FCNTL64, [*from as i64, F_GETFD, 0, 0, 0, 0]) {
+                    flags if flags < 0 => flags,
+                    flags => raw(
+                        SYS_FCNTL64,
+                        [*from as i64, F_SETFD, flags & !FD_CLOEXEC, 0, 0, 0],
+                    ),
+                }
+            }
+            Action::Dup2(from, to) => {
+                raw(SYS_DUP3, [*from as i64, *to as i64, 0, 0, 0, 0])
+            }
+            Action::Close(fd) => {
+                // 閉じている fd を閉じても失敗にしない（musl と同じ）
+                raw(SYS_CLOSE, [*fd as i64, 0, 0, 0, 0, 0]);
+                0
+            }
+            Action::Open(fd, path, oflag) => {
+                match raw(
+                    SYS_OPENAT,
+                    [AT_FDCWD, address(path.as_ptr()), *oflag, 0, 0, 0],
+                ) {
+                    opened if opened < 0 || opened == *fd as i64 => opened,
+                    opened => {
+                        let r = raw(SYS_DUP3, [opened, *fd as i64, 0, 0, 0, 0]);
+                        raw(SYS_CLOSE, [opened, 0, 0, 0, 0, 0]);
+                        r
+                    }
+                }
+            }
+            Action::Chdir(path) => {
+                raw(SYS_CHDIR, [address(path.as_ptr()), 0, 0, 0, 0, 0])
+            }
+        };
+        if r < 0 {
+            plan.error = (-r) as i32;
+            raw(SYS_EXIT, [127, 0, 0, 0, 0, 0]);
+            return;
+        }
+    }
+    let mut denied = false;
+    let mut error = ENOENT;
+    for candidate in &plan.candidates {
+        let r = raw(
+            SYS_EXECVE,
+            [
+                address(candidate.as_ptr()),
+                address(plan.argv.as_ptr()),
+                address(plan.envp.as_ptr()),
+                0,
+                0,
+                0,
+            ],
+        );
+        if r == 0 {
+            return;
+        }
+        match (-r) as i32 {
+            ENOENT | ENOTDIR => continue,
+            EACCES => denied = true,
+            other => {
+                error = other;
+                break;
+            }
+        }
+    }
+    plan.error = if error == ENOENT && denied {
+        EACCES
+    } else {
+        error
     };
-    tracing::debug!("posix_spawnp {argv:?} -> errno {errno}, pid {pid}");
-    if errno != 0 {
+    raw(SYS_EXIT, [127, 0, 0, 0, 0, 0]);
+}
+
+/// NUL で終わる文字列の並びと、それを指す NULL で終わる `char *` の並び（argv / envp の渡し方）。
+/// 文字列の持ち主（1 つ目）は、ポインターの並び（2 つ目）を使い終わるまで手放さないこと
+fn c_strings<'a>(
+    items: impl IntoIterator<Item = &'a str>,
+) -> (Vec<Vec<u8>>, Vec<u32>) {
+    let strings: Vec<Vec<u8>> = items.into_iter().map(linux_wasi::c_path).collect();
+    let mut pointers: Vec<u32> =
+        strings.iter().map(|s| s.as_ptr() as usize as u32).collect();
+    pointers.push(0);
+    (strings, pointers)
+}
+
+/// execvp(3) が試すパス。`/` の無い名前は、呼んだ側の `PATH` から探す
+fn candidates_of(file: &str) -> Vec<Vec<u8>> {
+    if file.contains('/') {
+        return vec![linux_wasi::c_path(file)];
+    }
+    let search = std::env::var("PATH").unwrap_or_else(|_| DEFAULT_PATH.to_owned());
+    search
+        .split(':')
+        // 空の要素は作業ディレクトリ（POSIX の取り決め）
+        .map(|directory| if directory.is_empty() { "." } else { directory })
+        .map(|directory| {
+            linux_wasi::c_path(&format!(
+                "{}/{file}",
+                directory.trim_end_matches('/')
+            ))
+        })
+        .collect()
+}
+
+/// `posix_spawnp(3)` と同じ。`argv[0]` を呼んだ側の `PATH` で探し、環境はこちらのものをそのまま渡す（exec と同じ）。
+/// 子は clone(2) の vfork の形で作り、子の段で `actions` を当ててから execve する。子の段で失敗したら、
+/// 127 で終わったその子を回収して errno を返す
+fn spawn(argv: &[&str], env: &[String], actions: Vec<Action>) -> io::Result<u32> {
+    let file = argv.first().copied().unwrap_or("");
+    let (_argv_strings, argv_pointers) = c_strings(argv.iter().copied());
+    let (_env_strings, env_pointers) = c_strings(env.iter().map(String::as_str));
+    let mut plan = ChildPlan {
+        candidates: candidates_of(file),
+        argv: argv_pointers,
+        envp: env_pointers,
+        actions,
+        error: 0,
+    };
+    let guard = SPAWNING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    PLAN.store(&mut plan, Ordering::Release);
+    let r = raw(SYS_CLONE, [CLONE_VM | CLONE_VFORK | SIGCHLD, 0, 0, 0, 0, 0]);
+    PLAN.store(std::ptr::null_mut(), Ordering::Release);
+    drop(guard);
+    tracing::debug!("clone {argv:?} -> {r}");
+    if r < 0 {
         return Err(io::Error::other(format!(
-            "posix_spawnp {file} failed (errno {errno})"
+            "cannot start {file}: {}",
+            linux_wasi::error_of((-r) as i32)
+        )));
+    }
+    let pid = r as u32;
+    if plan.error != 0 {
+        let _ = wait_blocking(pid);
+        return Err(io::Error::other(format!(
+            "cannot start {file}: {}",
+            linux_wasi::error_of(plan.error)
         )));
     }
     Ok(pid)
 }
 
+/// 子の段で失敗した子は、すでに終わっている。その子を回収する
+fn wait_blocking(pid: u32) -> io::Result<i32> {
+    loop {
+        if let Some(code) = try_wait(pid)? {
+            return Ok(code);
+        }
+        futex_sleep(Duration::from_millis(1));
+    }
+}
+
 /// カーネルのパイプ（読み端, 書き端）
 fn pipe() -> io::Result<(File, File)> {
     let mut fds = [-1i32; 2];
-    let errno = unsafe { host_pipe2(fds.as_mut_ptr(), 0) };
-    if errno != 0 {
-        return Err(io::Error::other(format!("pipe2 failed (errno {errno})")));
-    }
+    linux_wasi::call(SYS_PIPE2, [address(fds.as_mut_ptr()), 0, 0, 0, 0, 0])?;
     Ok(unsafe { (File::from_raw_fd(fds[0]), File::from_raw_fd(fds[1])) })
 }
 
@@ -215,16 +326,6 @@ fn feed(file: &mut File, input: &mut &[u8]) -> io::Result<bool> {
     Ok(true)
 }
 
-/// wait status を終了コードにする。シグナルで止まったら 128 + シグナル番号（シェルの `$?` と同じ表し方）
-fn exit_code(status: u32) -> i32 {
-    let signal = status & 0x7f;
-    if signal != 0 && signal != 0x7f {
-        128 + signal as i32
-    } else {
-        ((status >> 8) & 0xff) as i32
-    }
-}
-
 /// 子を起動して、終わるまで待つ（`Command::output()` と同じ役）。
 /// `input` があれば標準入力へ流してから閉じ、無ければ標準入力は `/dev/null`（`Stdio::null()`）
 pub fn output(
@@ -244,7 +345,7 @@ pub fn output(
     };
 
     // 子の 0 / 1 / 2 に繋ぐ。いったん仮の番号へ写してから移す（先に上書きした fd を後で読まないため）
-    let mut actions = FileActions::default();
+    let mut actions = Vec::new();
     let sources = [
         stdin.as_ref().map(|(read, _)| read.as_raw_fd()),
         Some(stdout_child.as_raw_fd()),
@@ -252,22 +353,26 @@ pub fn output(
     ];
     for (target, source) in sources.iter().enumerate() {
         if let Some(source) = source {
-            actions.dup2(*source, SCRATCH_FD + target as i32);
+            actions.push(Action::Dup2(*source, SCRATCH_FD + target as i32));
         }
     }
     for (target, source) in sources.iter().enumerate() {
         let target = target as i32;
         match source {
             Some(_) => {
-                actions.dup2(SCRATCH_FD + target, target);
-                actions.close(SCRATCH_FD + target);
+                actions.push(Action::Dup2(SCRATCH_FD + target, target));
+                actions.push(Action::Close(SCRATCH_FD + target));
             }
-            None => actions.open(target, "/dev/null", O_RDONLY),
+            None => actions.push(Action::Open(
+                target,
+                linux_wasi::c_path("/dev/null"),
+                O_RDONLY,
+            )),
         }
     }
-    actions.chdir(&cwd.to_string_lossy());
+    actions.push(Action::Chdir(linux_wasi::c_path(&cwd.to_string_lossy())));
 
-    let pid = spawn(argv, &env, &actions, 0)?;
+    let pid = spawn(argv, &env, actions)?;
     // 子はもう自分の写しを持っている。こちらの写しを閉じないと、読み手は EOF を見ない
     drop(stdout_child);
     drop(stderr_child);
@@ -285,8 +390,7 @@ pub fn output(
     let mut out = Vec::new();
     let mut err = Vec::new();
     let (mut out_done, mut err_done) = (false, false);
-    let mut status = 0u32;
-    let mut exited = false;
+    let mut code = None;
     loop {
         // 書き終えたら閉じる。閉じることが子から見た EOF である
         if let Some(file) = &mut stdin {
@@ -300,23 +404,15 @@ pub fn output(
         if !err_done {
             err_done = drain(&mut stderr, &mut err)?;
         }
-        if !exited {
-            match unsafe { host_waitpid(pid, &mut status, WNOHANG) } {
-                0 => exited = true,
-                ERRNO_AGAIN => {}
-                errno => {
-                    return Err(io::Error::other(format!(
-                        "waitpid failed (errno {errno})"
-                    )));
-                }
-            }
+        if code.is_none() {
+            code = try_wait(pid)?;
         }
-        if exited && out_done && err_done {
+        if code.is_some() && out_done && err_done {
             break;
         }
         futex_sleep(Duration::from_millis(2));
     }
-    let code = exit_code(status);
+    let code = code.unwrap_or_default();
     tracing::debug!("{argv:?} exited with {code}");
     Ok(Output {
         code,
@@ -327,7 +423,7 @@ pub fn output(
 
 /// 子を端末（pty の子の側、`/dev/pts/N`）の上で起動する。0/1/2 がその端末になり、子はその持ち主になる。
 ///
-/// 本物の Unix と同じく、`POSIX_SPAWN_SETSID` で新しいセッションを作り、端末を 0 / 1 / 2 に開く
+/// 本物の Linux と同じく、子の段で `setsid(2)` して新しいセッションを作り、端末を 0 / 1 / 2 に開く
 /// （それが子の制御端末になる）
 pub fn spawn_on_tty(
     argv: &[&str],
@@ -339,21 +435,40 @@ pub fn spawn_on_tty(
         .iter()
         .map(|(key, value)| format!("{key}={value}"))
         .collect();
-    let mut actions = FileActions::default();
+    let mut actions = vec![Action::Setsid];
     for fd in 0..3 {
-        actions.open(fd, tty, O_RDWR);
+        actions.push(Action::Open(fd, linux_wasi::c_path(tty), O_RDWR));
     }
-    actions.chdir(&cwd.to_string_lossy());
-    spawn(argv, &env, &actions, POSIX_SPAWN_SETSID)
+    actions.push(Action::Chdir(linux_wasi::c_path(&cwd.to_string_lossy())));
+    spawn(argv, &env, actions)
         .map_err(|error| io::Error::other(format!("{error} on {tty}")))
 }
 
-/// 終わっていれば終了コード。まだなら `None`（待たない）
+/// 終わっていれば終了コード（シグナルで止まったら 128 + シグナル番号。シェルの `$?` と同じ表し方）。
+/// まだなら `None`（`waitid(2)` の `WNOHANG`。待たない）
 pub fn try_wait(pid: u32) -> io::Result<Option<i32>> {
-    let mut status = 0u32;
-    match unsafe { host_waitpid(pid, &mut status, WNOHANG) } {
-        0 => Ok(Some(exit_code(status))),
-        ERRNO_AGAIN => Ok(None),
-        errno => Err(io::Error::other(format!("waitpid failed (errno {errno})"))),
+    let mut info = [0u8; SIGINFO_BYTES];
+    linux_wasi::call(
+        SYS_WAITID,
+        [
+            P_PID,
+            pid as i64,
+            address(info.as_mut_ptr()),
+            WEXITED | WNOHANG,
+            0,
+            0,
+        ],
+    )?;
+    let field = |offset: usize| {
+        i32::from_le_bytes(info[offset..offset + 4].try_into().unwrap())
+    };
+    // WNOHANG で終わっていなければ si_pid は 0
+    if field(SIGINFO_PID) == 0 {
+        return Ok(None);
     }
+    let status = field(SIGINFO_STATUS);
+    Ok(Some(match field(SIGINFO_CODE) {
+        CLD_KILLED | CLD_DUMPED => 128 + (status & 0x7f),
+        _ => status & 0xff,
+    }))
 }

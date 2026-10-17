@@ -1,9 +1,9 @@
 //! ファイルの見張り（WASI・BrowserOS）。**Linux と同じ inotify を使う。**
 //!
 //! notify は Linux では inotify を使うが、WASI では周期的に全体を見に行く PollWatcher に
-//! なり（既定 30 秒）、保存やコミットが画面に出るまで待たされる。BrowserOS は inotify
-//! （`inotify_init1` / `inotify_add_watch` / `inotify_rm_watch`）を `browser_os_inotify` の
-//! ホスト関数として持っているので、それを直に呼ぶ。
+//! なり（既定 30 秒）、保存やコミットが画面に出るまで待たされる。BrowserOS は Linux の syscall を
+//! 受ける（→ linux_wasi.rs）ので、Linux の inotify（`inotify_init1(2)` / `inotify_add_watch(2)` /
+//! `inotify_rm_watch(2)`）を直に呼ぶ。
 //!
 //! 出来事の組み立ては notify の inotify 実装（`notify/src/inotify.rs`）を写してある。
 //! 見張りは再帰ではないので、ディレクトリができたらそこにも見張りを足し、名前の変更は
@@ -37,21 +37,10 @@ use notify::{
 use parking_lot::Mutex;
 use walkdir::WalkDir;
 
-#[link(wasm_import_module = "browser_os_inotify")]
-unsafe extern "C" {
-    #[link_name = "inotify_init1"]
-    fn host_inotify_init1(flags: i32, fd: *mut u32) -> i32;
-    #[link_name = "inotify_add_watch"]
-    fn host_inotify_add_watch(
-        fd: u32,
-        path: *const u8,
-        path_len: usize,
-        mask: u32,
-        wd: *mut i32,
-    ) -> i32;
-    #[link_name = "inotify_rm_watch"]
-    fn host_inotify_rm_watch(fd: u32, wd: i32) -> i32;
-}
+use crate::linux_wasi::{
+    self, O_CLOEXEC, O_NONBLOCK, SYS_INOTIFY_ADD_WATCH, SYS_INOTIFY_INIT1,
+    SYS_INOTIFY_RM_WATCH, address,
+};
 
 /* `linux/inotify.h` */
 const IN_MODIFY: u32 = 0x0000_0002;
@@ -66,8 +55,9 @@ const IN_MOVE_SELF: u32 = 0x0000_0800;
 const IN_Q_OVERFLOW: u32 = 0x0000_4000;
 const IN_IGNORED: u32 = 0x0000_8000;
 const IN_ISDIR: u32 = 0x4000_0000;
-/// `O_NONBLOCK`
-const IN_NONBLOCK: i32 = 0o4000;
+/// `IN_NONBLOCK`・`IN_CLOEXEC`（`O_NONBLOCK`・`O_CLOEXEC` と同じ値）
+const IN_NONBLOCK: i64 = O_NONBLOCK;
+const IN_CLOEXEC: i64 = O_CLOEXEC;
 
 /// 何も来ていないとき、次に読みに行くまでの間隔
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -78,9 +68,13 @@ fn futex_sleep(duration: Duration) {
     let _ = receiver.recv_timeout(duration);
 }
 
-fn os_error(errno: i32, path: &Path) -> Error {
-    Error::io(io::Error::other(format!("inotify failed (errno {errno})")))
-        .add_path(path.to_path_buf())
+fn os_error(error: io::Error, path: &Path) -> Error {
+    Error::io(error).add_path(path.to_path_buf())
+}
+
+/// 見張りを外す（`inotify_rm_watch(2)`）。もう無い見張りでも失敗にしない
+fn rm_watch(fd: u32, wd: i32) {
+    let _ = linux_wasi::call(SYS_INOTIFY_RM_WATCH, [fd as i64, wd as i64, 0, 0, 0, 0]);
 }
 
 struct RawEvent {
@@ -148,13 +142,12 @@ impl State {
         if let Some(&(_, old, _)) = self.watches.get(&path) {
             mask |= old;
         }
-        let bytes = path.to_string_lossy();
-        let mut wd = 0i32;
-        let errno =
-            unsafe { host_inotify_add_watch(self.fd, bytes.as_ptr(), bytes.len(), mask, &mut wd) };
-        if errno != 0 {
-            return Err(os_error(errno, &path));
-        }
+        let bytes = linux_wasi::c_path(&path.to_string_lossy());
+        let wd = linux_wasi::call(
+            SYS_INOTIFY_ADD_WATCH,
+            [self.fd as i64, address(bytes.as_ptr()), mask as i64, 0, 0, 0],
+        )
+        .map_err(|error| os_error(error, &path))? as i32;
         self.watches.insert(path.clone(), (wd, mask, is_recursive));
         self.paths.insert(wd, path);
         Ok(())
@@ -164,14 +157,14 @@ impl State {
         let Some((wd, _, is_recursive)) = self.watches.remove(&path) else {
             return Err(Error::watch_not_found().add_path(path));
         };
-        unsafe { host_inotify_rm_watch(self.fd, wd) };
+        rm_watch(self.fd, wd);
         self.paths.remove(&wd);
         if is_recursive || remove_recursive {
             let children: Vec<PathBuf> =
                 self.watches.keys().filter(|p| p.starts_with(&path)).cloned().collect();
             for child in children {
                 if let Some((wd, _, _)) = self.watches.remove(&child) {
-                    unsafe { host_inotify_rm_watch(self.fd, wd) };
+                    rm_watch(self.fd, wd);
                     self.paths.remove(&wd);
                 }
             }
@@ -332,13 +325,8 @@ pub struct InotifyWatcher {
 
 impl Watcher for InotifyWatcher {
     fn new<F: EventHandler>(event_handler: F, _config: Config) -> Result<Self> {
-        let mut fd = 0u32;
-        let errno = unsafe { host_inotify_init1(IN_NONBLOCK, &mut fd) };
-        if errno != 0 {
-            return Err(Error::io(io::Error::other(format!(
-                "inotify_init1 failed (errno {errno})"
-            ))));
-        }
+        let fd = linux_wasi::call(SYS_INOTIFY_INIT1, [IN_NONBLOCK | IN_CLOEXEC, 0, 0, 0, 0, 0])
+            .map_err(Error::io)? as u32;
         let state = Arc::new(Mutex::new(State {
             fd,
             file: unsafe { File::from_raw_fd(fd as i32) },

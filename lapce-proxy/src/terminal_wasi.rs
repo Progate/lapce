@@ -1,10 +1,11 @@
 //! 端末（WASI・BrowserOS）。**Linux と同じく pty の上でシェルを動かす。**
 //!
 //! ネイティブ版は alacritty_terminal の pty と event_loop（epoll / kqueue）を使うが、
-//! WASI にはどちらも無い。BrowserOS は pty を `browser_os_pty` のホスト関数として持ち
-//! （`openpty` / `set_winsize`）、子プロセスは本物と同じ形の `posix_spawnp` で起こせる。
-//! Linux と同じく `POSIX_SPAWN_SETSID` で新しいセッションを作り、端末を 0 / 1 / 2 に開くと、
-//! それが子の制御端末になる（→ wasi_process.rs の `spawn_on_tty`）。
+//! WASI にはどちらも無い。BrowserOS は Linux の syscall を受ける（→ linux_wasi.rs）ので、pty は
+//! Linux の openpty(3) と同じく `/dev/ptmx` を開き、`ioctl(TIOCSPTLCK)` で錠を外し、`ioctl(TIOCGPTN)` で
+//! 従の番号を引いて `/dev/pts/<N>` を得る。窓の大きさは `ioctl(TIOCSWINSZ)`。子は Linux と同じく
+//! `setsid(2)` で新しいセッションを作り、端末を 0 / 1 / 2 に開くと、それが子の制御端末になる
+//! （→ wasi_process.rs の `spawn_on_tty`）。
 //!
 //! 画面側（lapce-app）はネイティブ版と同じで、ここが送るのは端末へ書かれたバイト列
 //! （`update_terminal`）と、子の pid と終了コードだけである。
@@ -29,21 +30,49 @@ use lapce_rpc::{
     terminal::{TermId, TerminalProfile},
 };
 
-use crate::wasi_process;
+use crate::{
+    linux_wasi::{self, AT_FDCWD, O_CLOEXEC, O_NOCTTY, O_RDWR, SYS_IOCTL, SYS_OPENAT, address},
+    wasi_process,
+};
 
-#[link(wasm_import_module = "browser_os_pty")]
-unsafe extern "C" {
-    #[link_name = "openpty"]
-    fn host_openpty(
-        master_fd: *mut u32,
-        name: *mut u8,
-        name_cap: u32,
-        name_len: *mut u32,
-        rows: u32,
-        cols: u32,
-    ) -> i32;
-    #[link_name = "set_winsize"]
-    fn host_set_winsize(master_fd: u32, rows: u32, cols: u32) -> i32;
+/// ioctl(2) の要求（Linux の値）
+const TIOCSWINSZ: i64 = 0x5414;
+const TIOCGPTN: i64 = 0x8004_5430;
+const TIOCSPTLCK: i64 = 0x4004_5431;
+
+/// `struct winsize`（行・列・画素の幅・画素の高さ）
+#[repr(C)]
+struct Winsize {
+    rows: u16,
+    cols: u16,
+    xpixel: u16,
+    ypixel: u16,
+}
+
+/// 窓の大きさを変える（主からの `ioctl(TIOCSWINSZ)`。端末の上の前面のグループに SIGWINCH が届く）
+fn set_winsize(master: &File, rows: u16, cols: u16) -> io::Result<()> {
+    let size = Winsize { rows, cols, xpixel: 0, ypixel: 0 };
+    linux_wasi::call(
+        SYS_IOCTL,
+        [master.as_raw_fd() as i64, TIOCSWINSZ, address(&size), 0, 0, 0],
+    )?;
+    Ok(())
+}
+
+/// openpty(3)。主の fd と、従のパス（`/dev/pts/<N>`）
+fn openpty(rows: u16, cols: u16) -> io::Result<(File, String)> {
+    let ptmx = linux_wasi::c_path("/dev/ptmx");
+    let fd = linux_wasi::call(
+        SYS_OPENAT,
+        [AT_FDCWD, address(ptmx.as_ptr()), O_RDWR | O_NOCTTY | O_CLOEXEC, 0, 0, 0],
+    )?;
+    let master = unsafe { File::from_raw_fd(fd as i32) };
+    let unlock = 0i32;
+    linux_wasi::call(SYS_IOCTL, [fd, TIOCSPTLCK, address(&unlock), 0, 0, 0])?;
+    let mut number = 0u32;
+    linux_wasi::call(SYS_IOCTL, [fd, TIOCGPTN, address(&raw mut number), 0, 0, 0])?;
+    set_winsize(&master, rows, cols)?;
+    Ok((master, format!("/dev/pts/{number}")))
 }
 
 /// 画面側から端末へ
@@ -99,24 +128,7 @@ pub fn start(
     rows: u16,
     core_rpc: CoreRpcHandler,
 ) -> Result<(TerminalSender, u32)> {
-    let mut master = 0u32;
-    let mut name = [0u8; 64];
-    let mut name_len = 0u32;
-    let errno = unsafe {
-        host_openpty(
-            &mut master,
-            name.as_mut_ptr(),
-            name.len() as u32,
-            &mut name_len,
-            rows as u32,
-            cols as u32,
-        )
-    };
-    if errno != 0 {
-        return Err(anyhow!("openpty failed (errno {errno})"));
-    }
-    let tty = String::from_utf8_lossy(&name[..name_len as usize]).into_owned();
-    let mut master = unsafe { File::from_raw_fd(master as i32) };
+    let (mut master, tty) = openpty(rows, cols).map_err(|error| anyhow!("openpty failed: {error}"))?;
     set_nonblocking(&master)?;
 
     let (shell, arguments) = program(&profile);
@@ -197,7 +209,9 @@ fn run(
                     busy = true;
                 }
                 Ok(TerminalMessage::Resize { rows, cols }) => {
-                    unsafe { host_set_winsize(master.as_raw_fd() as u32, rows as u32, cols as u32) };
+                    if let Err(error) = set_winsize(master, rows, cols) {
+                        tracing::error!("{:?}", error);
+                    }
                 }
                 // 親の側を閉じれば、端末の上のプロセスは OS が畳む（実機の SIGHUP と同じ）
                 Ok(TerminalMessage::Shutdown) | Err(TryRecvError::Disconnected) => return,

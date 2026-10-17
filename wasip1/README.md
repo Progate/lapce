@@ -34,13 +34,13 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
 | ネイティブ版 | WASI 版 |
 | --- | --- |
 | 自分を子プロセスで起動し直して端末を空ける | しない（子プロセスは std から起動できない） |
-| libgit2 | BrowserOS の `git` を `posix_spawn` で呼ぶ（`lapce-proxy/src/git_wasi.rs`・`wasi_process.rs`） |
-| inotify / FSEvents（notify） | BrowserOS の inotify（`browser_os_inotify`。`lapce-proxy/src/inotify_wasi.rs`） |
+| libgit2 | BrowserOS の `git` を Linux の syscall（`clone` の vfork の形と `execve`）で起こす（`lapce-proxy/src/git_wasi.rs`・`wasi_process.rs`。syscall は `linux_wasi.rs`） |
+| inotify / FSEvents（notify） | Linux の inotify（`inotify_init1(2)` ほか。`lapce-proxy/src/inotify_wasi.rs`） |
 | 文法を dlopen で読む | 主な言語の文法を静的に組み込み、ハイライトは文法の crate 同梱の定義を使う（`lapce-core/src/language.rs`） |
 | `directories` | Linux と同じ XDG の置き場（`lapce-core/src/xdg.rs`） |
 | ゴミ箱（trash） | freedesktop.org のゴミ箱（`~/.local/share/Trash`）へ自分で移す |
 | プラグイン（wasmtime） | 未対応（起動しようとすると理由付きで失敗する） |
-| 端末（pty と epoll の event_loop） | BrowserOS の pty（`browser_os_pty` の `openpty`）の上で `posix_spawn_tty` でシェルを起動する（`lapce-proxy/src/terminal_wasi.rs`） |
+| 端末（pty と epoll の event_loop） | Linux の openpty(3) と同じく `/dev/ptmx` を開いた pty の上で、`setsid(2)` してからシェルを起動する（`lapce-proxy/src/terminal_wasi.rs`） |
 | HTTP（プラグインの取得・更新の確認） | 未対応 |
 | 単一起動の IPC | 無し（毎回自分で窓を開く） |
 
