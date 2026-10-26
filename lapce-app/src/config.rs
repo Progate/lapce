@@ -92,13 +92,12 @@ pub struct DropdownInfo {
     /// The currently selected item.
     pub active_index: usize,
     pub items: im::Vector<String>,
-    /// What the dropdown shows for each item, when that is not the value
-    /// written to the settings file (a language's name for its code).
+    /// 選択肢ごとに出す文字。設定ファイルに書く値と違うとき（言語のコードに対する言語の名前・訳した選択肢）
     pub labels: Option<im::Vector<String>>,
 }
 
 impl DropdownInfo {
-    /// What the dropdown shows for `value`.
+    /// `value` の選択肢に出す文字
     pub fn label_of(&self, value: &str) -> String {
         self.labels
             .as_ref()
@@ -127,7 +126,7 @@ pub struct LapceConfig {
     pub plugins: HashMap<String, HashMap<String, serde_json::Value>>,
     #[serde(skip)]
     pub color: ThemeColor,
-    /// The UI language `core.language` asks for (see [`crate::i18n`]).
+    /// `core.language` が指す画面の言語（→ [`crate::i18n`]）
     #[serde(skip)]
     pub ui_language: Language,
     #[serde(skip)]
@@ -959,7 +958,12 @@ impl LapceConfig {
                     .position(|w| w == self.editor.wrap_style)
                     .unwrap_or(0),
                 items: self.wrap_style_list.clone(),
-                labels: None,
+                labels: Some(
+                    self.wrap_style_list
+                        .iter()
+                        .map(|item| i18n::pt("wrap-style", item))
+                        .collect(),
+                ),
             }),
             ("ui", "tab-close-button") => Some(DropdownInfo {
                 active_index: self.ui.tab_close_button as usize,
@@ -968,7 +972,13 @@ impl LapceConfig {
                     .map(|s| s.to_string())
                     .sorted()
                     .collect(),
-                labels: None,
+                labels: Some(
+                    ui::TabCloseButton::VARIANTS
+                        .iter()
+                        .sorted()
+                        .map(|s| i18n::pt("tab-close-button", s))
+                        .collect(),
+                ),
             }),
             ("ui", "tab-separator-height") => Some(DropdownInfo {
                 active_index: self.ui.tab_separator_height as usize,
@@ -977,7 +987,13 @@ impl LapceConfig {
                     .map(|s| s.to_string())
                     .sorted()
                     .collect(),
-                labels: None,
+                labels: Some(
+                    ui::TabSeparatorHeight::VARIANTS
+                        .iter()
+                        .sorted()
+                        .map(|s| i18n::pt("tab-separator-height", s))
+                        .collect(),
+                ),
             }),
             ("terminal", "default-profile") => Some(DropdownInfo {
                 active_index: self

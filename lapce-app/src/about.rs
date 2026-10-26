@@ -13,6 +13,7 @@ use lapce_core::{command::FocusCommand, meta::VERSION, mode::Mode};
 use crate::{
     command::{CommandExecuted, CommandKind},
     config::color::LapceColor,
+    i18n,
     keypress::KeyPressFocus,
     web_link::web_link,
     window_tab::{Focus, WindowTabData},
@@ -110,12 +111,12 @@ pub fn about_popup(window_tab_data: Rc<WindowTabData>) -> impl View {
                     .margin_top(10.0)
                     .color(config.get().color(LapceColor::EDITOR_FOREGROUND))
             }),
-            label(|| format!("Version: {}", VERSION)).style(move |s| {
+            label(|| i18n::tf("Version: {}", &[&VERSION])).style(move |s| {
                 s.margin_top(10.0)
                     .color(config.get().color(LapceColor::EDITOR_DIM))
             }),
             web_link(
-                || "Website".to_string(),
+                || i18n::t("Website").to_string(),
                 || AboutUri::LAPCE.to_string(),
                 move || config.get().color(LapceColor::EDITOR_LINK),
                 internal_command,
@@ -142,7 +143,7 @@ pub fn about_popup(window_tab_data: Rc<WindowTabData>) -> impl View {
                 internal_command,
             )
             .style(|s| s.margin_top(10.0)),
-            label(|| "Attributions".to_string()).style(move |s| {
+            label(|| i18n::t("Attributions").to_string()).style(move |s| {
                 s.font_bold()
                     .color(config.get().color(LapceColor::EDITOR_DIM))
                     .margin_top(40.0)

@@ -34,6 +34,7 @@ use crate::{
     config::{LapceConfig, color::LapceColor},
     debug::RunDebugProcess,
     editor::location::{EditorLocation, EditorPosition},
+    i18n,
     listener::Listener,
     panel::kind::PanelKind,
     window_tab::Focus,
@@ -642,7 +643,7 @@ impl View for TerminalView {
         if let Some(error) = self.launch_error.get() {
             let mut text_layout = TextLayout::new();
             text_layout.set_text(
-                &format!("Terminal failed to launch. Error: {error}"),
+                &i18n::tf("Terminal failed to launch. Error: {}", &[&error]),
                 AttrsList::new(
                     attrs.color(config.color(LapceColor::EDITOR_FOREGROUND)),
                 ),

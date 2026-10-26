@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use lapce_core::line_ending::LineEnding;
 use lapce_rpc::dap_types::RunDebugConfig;
 use lsp_types::{Range, SymbolKind};
+use strum::EnumMessage;
 
 use crate::{
     command::{LapceCommand, LapceWorkbenchCommand},
@@ -84,4 +85,17 @@ pub enum PaletteItemContent {
         name: String,
         profile: lapce_rpc::terminal::TerminalProfile,
     },
+}
+
+impl PaletteItem {
+    /// 表示している `filter_text` が訳文のとき、その英語の原文。
+    /// 英語に慣れた人が英語のコマンド名を打っても見つかるよう、絞り込みで訳文と合わせて照らす。
+    pub fn english_filter_text(&self) -> Option<&'static str> {
+        let english = match &self.content {
+            PaletteItemContent::Command { cmd } => cmd.kind.desc()?,
+            PaletteItemContent::PaletteHelp { cmd } => cmd.get_message()?,
+            _ => return None,
+        };
+        (!self.filter_text.ends_with(english)).then_some(english)
+    }
 }

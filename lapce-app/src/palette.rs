@@ -41,6 +41,7 @@ use self::{
 use crate::{
     command::{
         CommandExecuted, CommandKind, InternalCommand, LapceCommand, WindowCommand,
+        command_title,
     },
     db::LapceDb,
     debug::{RunDebugConfigs, RunDebugMode},
@@ -48,6 +49,7 @@ use crate::{
         EditorData,
         location::{EditorLocation, EditorPosition},
     },
+    i18n,
     keypress::{KeyPressData, KeyPressFocus, condition::Condition},
     lsp::path_from_url,
     main_split::MainSplitData,
@@ -344,14 +346,14 @@ impl PaletteData {
     /// Get the placeholder text to use in the palette input field.
     pub fn placeholder_text(&self) -> &'static str {
         match self.kind.get() {
-            PaletteKind::SshHost => {
-                "Type [user@]host or select a previously connected workspace below"
-            }
+            PaletteKind::SshHost => i18n::t(
+                "Type [user@]host or select a previously connected workspace below",
+            ),
             PaletteKind::DiffFiles => {
                 if self.left_diff_path.with(Option::is_some) {
-                    "Select right file"
+                    i18n::t("Select right file")
                 } else {
-                    "Seleft left file"
+                    i18n::t("Select left file")
                 }
             }
             _ => "",
@@ -444,7 +446,7 @@ impl PaletteData {
             .map(|(kind, cmd)| {
                 let description = kind.symbol().to_string()
                     + " "
-                    + cmd.get_message().unwrap_or("");
+                    + &cmd.get_message().map(command_title).unwrap_or_default();
 
                 PaletteItem {
                     content: PaletteItemContent::PaletteHelp { cmd },
@@ -564,9 +566,9 @@ impl PaletteData {
                 .rev()
                 .filter_map(|(key, _)| {
                     keypress.commands.get(key).and_then(|c| {
-                        c.kind.desc().as_ref().map(|m| PaletteItem {
+                        c.kind.title().map(|m| PaletteItem {
                             content: PaletteItemContent::Command { cmd: c.clone() },
-                            filter_text: m.to_string(),
+                            filter_text: m,
                             score: 0,
                             indices: vec![],
                         })
@@ -584,9 +586,9 @@ impl PaletteData {
                     return None;
                 }
 
-                c.kind.desc().as_ref().map(|m| PaletteItem {
+                c.kind.title().map(|m| PaletteItem {
                     content: PaletteItemContent::Command { cmd: c.clone() },
-                    filter_text: m.to_string(),
+                    filter_text: m,
                     score: 0,
                     indices: vec![],
                 })
@@ -1581,6 +1583,17 @@ impl PaletteData {
                 item.score = score;
                 item.indices = indices.iter().map(|i| *i as usize).collect();
                 filtered_items.push(item);
+            } else if let Some(english) = i.english_filter_text() {
+                // 訳されたコマンド名は英語の名前でも探せるようにする。
+                // 一致した位置は表示中の訳文の位置ではないので強調しない
+                filter_text_buf.clear();
+                let english = Utf32Str::new(english, &mut filter_text_buf);
+                if let Some(score) = pattern.score(english, matcher) {
+                    let mut item = i.clone();
+                    item.score = score;
+                    item.indices = Vec::new();
+                    filtered_items.push(item);
+                }
             }
         }
 

@@ -806,7 +806,7 @@ fn editor_tab_header(
                 },
                 || false,
                 || false,
-                || "Close",
+                || i18n::t("Close"),
                 config,
             )
             .on_event_stop(EventListener::PointerDown, |_| {})
@@ -1082,7 +1082,7 @@ fn editor_tab_header(
                         },
                         || false,
                         || false,
-                        || "Previous Tab",
+                        || i18n::t("Previous Tab"),
                         config,
                     )
                     .style(|s| s.margin_horiz(6.0).margin_vert(7.0)),
@@ -1094,7 +1094,7 @@ fn editor_tab_header(
                         },
                         || false,
                         || false,
-                        || "Next Tab",
+                        || i18n::t("Next Tab"),
                         config,
                     )
                     .style(|s| s.margin_right(6.0)),
@@ -1183,7 +1183,7 @@ fn editor_tab_header(
                         },
                         || false,
                         || false,
-                        || "Split Horizontally",
+                        || i18n::t("Split Horizontally"),
                         config,
                     )
                     .style(|s| s.margin_left(6.0)),
@@ -1198,7 +1198,7 @@ fn editor_tab_header(
                         },
                         || false,
                         || false,
-                        || "Close All",
+                        || i18n::t("Close All"),
                         config,
                     )
                     .style(|s| s.margin_horiz(6.0)),
@@ -2746,7 +2746,7 @@ fn palette_content(
                 .min_height(0.0)
                 .set(PropagatePointerWheel, false)
         }),
-        text("No matching results").style(move |s| {
+        text(i18n::t("No matching results")).style(move |s| {
             s.display(if items.with(|items| items.is_empty()) {
                 Display::Flex
             } else {
@@ -2902,7 +2902,7 @@ fn window_message_view(
                     },
                     || false,
                     || false,
-                    || "Close",
+                    || i18n::t("Close"),
                     config,
                 )
                 .style(|s| s.margin_left(6.0)),
@@ -3435,7 +3435,7 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
                     stack((
                         text(
                             workspace_title(&tab.workspace)
-                                .unwrap_or_else(|| String::from("New Tab")),
+                                .unwrap_or_else(|| String::from(i18n::t("New Tab"))),
                         )
                         .style(|s| {
                             s.margin_left(10.0)
@@ -3458,7 +3458,7 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
                                 },
                                 || false,
                                 || false,
-                                || "Close",
+                                || i18n::t("Close"),
                                 config.read_only(),
                             )
                             .style(|s| s.margin_horiz(6.0))
@@ -3616,7 +3616,7 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
             },
             || false,
             || false,
-            || "New Workspace Tab",
+            || i18n::t("New Workspace Tab"),
             config.read_only(),
         ))
         .on_resize(move |rect| {
@@ -3676,9 +3676,8 @@ fn window(window_data: WindowData) -> impl View {
     let window_tabs = window_data.window_tabs.read_only();
     let active = window_data.active.read_only();
     let config = window_data.config;
-    // Views take their text when they are built, so a new UI language (see
-    // `crate::i18n`) rebuilds them. The language is part of the key; the data
-    // the views show (documents, editors, panels) stays as it is.
+    // ビューは作るときに文字を取るので、画面の言語（→ crate::i18n）が変わったら作り直す。
+    // 言語をキーに含めて作り直すのはビューだけで、映している中身（文書・エディター・パネル）はそのまま残る
     let items = move || {
         let language = config.with(|config| config.ui_language);
         window_tabs
@@ -4265,103 +4264,106 @@ pub fn window_menu(
     Menu::new("Lapce")
         .entry({
             let mut menu = Menu::new("Lapce")
-                .entry(MenuItem::new("About Lapce").action(move || {
+                .entry(MenuItem::new(i18n::t("About Lapce")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::ShowAbout)
                 }))
                 .separator()
                 .entry(
-                    Menu::new("Settings...")
-                        .entry(MenuItem::new("Open Settings").action(move || {
-                            workbench_command
-                                .send(LapceWorkbenchCommand::OpenSettings);
-                        }))
-                        .entry(MenuItem::new("Open Keyboard Shortcuts").action(
+                    Menu::new(i18n::t("Settings..."))
+                        .entry(MenuItem::new(i18n::t("Open Settings")).action(
                             move || {
-                                workbench_command.send(
-                                    LapceWorkbenchCommand::OpenKeyboardShortcuts,
-                                );
+                                workbench_command
+                                    .send(LapceWorkbenchCommand::OpenSettings);
                             },
-                        )),
+                        ))
+                        .entry(
+                            MenuItem::new(i18n::t("Open Keyboard Shortcuts"))
+                                .action(move || {
+                                    workbench_command.send(
+                                        LapceWorkbenchCommand::OpenKeyboardShortcuts,
+                                    );
+                                }),
+                        ),
                 )
                 .separator()
-                .entry(MenuItem::new("Quit Lapce").action(move || {
+                .entry(MenuItem::new(i18n::t("Quit Lapce")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::Quit);
                 }));
             if cfg!(target_os = "macos") {
                 menu = menu
                     .separator()
-                    .entry(MenuItem::new("Hide Lapce"))
-                    .entry(MenuItem::new("Hide Others"))
-                    .entry(MenuItem::new("Show All"))
+                    .entry(MenuItem::new(i18n::t("Hide Lapce")))
+                    .entry(MenuItem::new(i18n::t("Hide Others")))
+                    .entry(MenuItem::new(i18n::t("Show All")))
             }
             menu
         })
         .separator()
         .entry(
-            Menu::new("File")
-                .entry(MenuItem::new("New File").action(move || {
+            Menu::new(i18n::t("File"))
+                .entry(MenuItem::new(i18n::t("New File")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::NewFile);
                 }))
                 .separator()
-                .entry(MenuItem::new("Open").action(move || {
+                .entry(MenuItem::new(i18n::t("Open")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::OpenFile);
                 }))
-                .entry(MenuItem::new("Open Folder").action(move || {
+                .entry(MenuItem::new(i18n::t("Open Folder")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::OpenFolder);
                 }))
                 .separator()
-                .entry(MenuItem::new("Save").action(move || {
+                .entry(MenuItem::new(i18n::t("Save")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Focus(FocusCommand::Save),
                         data: None,
                     });
                 }))
-                .entry(MenuItem::new("Save All").action(move || {
+                .entry(MenuItem::new(i18n::t("Save All")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::SaveAll);
                 }))
                 .separator()
-                .entry(MenuItem::new("Close Folder").action(move || {
+                .entry(MenuItem::new(i18n::t("Close Folder")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::CloseFolder);
                 }))
-                .entry(MenuItem::new("Close Window").action(move || {
+                .entry(MenuItem::new(i18n::t("Close Window")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::CloseWindow);
                 })),
         )
         .entry(
-            Menu::new("Edit")
-                .entry(MenuItem::new("Cut").action(move || {
+            Menu::new(i18n::t("Edit"))
+                .entry(MenuItem::new(i18n::t("Cut")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Edit(EditCommand::ClipboardCut),
                         data: None,
                     });
                 }))
-                .entry(MenuItem::new("Copy").action(move || {
+                .entry(MenuItem::new(i18n::t("Copy")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Edit(EditCommand::ClipboardCopy),
                         data: None,
                     });
                 }))
-                .entry(MenuItem::new("Paste").action(move || {
+                .entry(MenuItem::new(i18n::t("Paste")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Edit(EditCommand::ClipboardPaste),
                         data: None,
                     });
                 }))
                 .separator()
-                .entry(MenuItem::new("Undo").action(move || {
+                .entry(MenuItem::new(i18n::t("Undo")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Edit(EditCommand::Undo),
                         data: None,
                     });
                 }))
-                .entry(MenuItem::new("Redo").action(move || {
+                .entry(MenuItem::new(i18n::t("Redo")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Edit(EditCommand::Redo),
                         data: None,
                     });
                 }))
                 .separator()
-                .entry(MenuItem::new("Find").action(move || {
+                .entry(MenuItem::new(i18n::t("Find")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Focus(FocusCommand::Search),
                         data: None,
@@ -4379,35 +4381,39 @@ fn tab_secondary_click(
     let child_right = child.clone();
     let child_left = child.clone();
     menu = menu
-        .entry(MenuItem::new("Close").action(move || {
+        .entry(MenuItem::new(i18n::t("Close")).action(move || {
             internal_command.send(InternalCommand::EditorTabChildClose {
                 editor_tab_id,
                 child: child.clone(),
             });
         }))
-        .entry(MenuItem::new("Close Other Tabs").action(move || {
+        .entry(MenuItem::new(i18n::t("Close Other Tabs")).action(move || {
             internal_command.send(InternalCommand::EditorTabCloseByKind {
                 editor_tab_id,
                 child: child_other.clone(),
                 kind: TabCloseKind::CloseOther,
             });
         }))
-        .entry(MenuItem::new("Close All Tabs").action(move || {
+        .entry(MenuItem::new(i18n::t("Close All Tabs")).action(move || {
             internal_command.send(InternalCommand::EditorTabClose { editor_tab_id });
         }))
-        .entry(MenuItem::new("Close Tabs to the Right").action(move || {
-            internal_command.send(InternalCommand::EditorTabCloseByKind {
-                editor_tab_id,
-                child: child_right.clone(),
-                kind: TabCloseKind::CloseToRight,
-            });
-        }))
-        .entry(MenuItem::new("Close Tabs to the Left").action(move || {
-            internal_command.send(InternalCommand::EditorTabCloseByKind {
-                editor_tab_id,
-                child: child_left.clone(),
-                kind: TabCloseKind::CloseToLeft,
-            });
-        }));
+        .entry(
+            MenuItem::new(i18n::t("Close Tabs to the Right")).action(move || {
+                internal_command.send(InternalCommand::EditorTabCloseByKind {
+                    editor_tab_id,
+                    child: child_right.clone(),
+                    kind: TabCloseKind::CloseToRight,
+                });
+            }),
+        )
+        .entry(
+            MenuItem::new(i18n::t("Close Tabs to the Left")).action(move || {
+                internal_command.send(InternalCommand::EditorTabCloseByKind {
+                    editor_tab_id,
+                    child: child_left.clone(),
+                    kind: TabCloseKind::CloseToLeft,
+                });
+            }),
+        );
     show_context_menu(menu, None);
 }

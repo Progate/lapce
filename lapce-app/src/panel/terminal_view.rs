@@ -22,6 +22,7 @@ use crate::{
     command::{InternalCommand, LapceWorkbenchCommand},
     config::{color::LapceColor, icon::LapceIcons},
     debug::RunDebugMode,
+    i18n,
     listener::Listener,
     terminal::{
         panel::TerminalPanelData, tab::TerminalTabData, view::terminal_view,
@@ -142,7 +143,7 @@ fn terminal_tab_header(window_tab_data: Rc<WindowTabData>) -> impl View {
                                 },
                                 || false,
                                 || false,
-                                || "Close",
+                                || i18n::t("Close"),
                                 config,
                             )
                             .style(|s| s.margin_horiz(6.0)),
@@ -230,7 +231,7 @@ fn terminal_tab_header(window_tab_data: Rc<WindowTabData>) -> impl View {
             },
             || false,
             || false,
-            || "New Terminal",
+            || i18n::t("New Terminal"),
             config,
         ))
         .on_resize(move |rect| {
@@ -370,13 +371,13 @@ fn tab_secondary_click(
 ) {
     let mut menu = Menu::new("");
     menu = menu
-        .entry(MenuItem::new("Stop").action(move || {
+        .entry(MenuItem::new(i18n::t("Stop")).action(move || {
             internal_command.send(InternalCommand::StopTerminal { term_id });
         }))
-        .entry(MenuItem::new("Restart").action(move || {
+        .entry(MenuItem::new(i18n::t("Restart")).action(move || {
             internal_command.send(InternalCommand::RestartTerminal { term_id });
         }))
-        .entry(MenuItem::new("Clear All").action(move || {
+        .entry(MenuItem::new(i18n::t("Clear All")).action(move || {
             internal_command.send(InternalCommand::ClearTerminalBuffer {
                 view_id,
                 tab_index,

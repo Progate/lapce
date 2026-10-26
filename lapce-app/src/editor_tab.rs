@@ -26,6 +26,7 @@ use crate::{
         diff::{DiffEditorData, DiffEditorInfo},
         location::EditorLocation,
     },
+    i18n,
     id::{
         DiffEditorId, EditorTabId, KeymapId, SettingsId, SplitId,
         ThemeColorSettingsId, VoltViewId,
@@ -297,11 +298,12 @@ impl EditorTabChild {
                         (
                             svg,
                             color,
-                            format!(
+                            i18n::tf(
                                 "{} (Diff)",
-                                path.file_name()
+                                &[&path
+                                    .file_name()
                                     .unwrap_or_default()
-                                    .to_string_lossy()
+                                    .to_string_lossy()],
                             ),
                             is_pristine,
                         )
@@ -321,7 +323,10 @@ impl EditorTabChild {
                         (
                             svg,
                             color,
-                            format!("{left_file_name} - {right_file_name} (Diff)"),
+                            i18n::tf(
+                                "{} - {} (Diff)",
+                                &[&left_file_name, &right_file_name],
+                            ),
                             left_is_pristine && right_is_pristine,
                         )
                     }
@@ -346,7 +351,7 @@ impl EditorTabChild {
                 EditorTabChildViewInfo {
                     icon: config.ui_svg(LapceIcons::SETTINGS),
                     color: Some(config.color(LapceColor::LAPCE_ICON_ACTIVE)),
-                    name: "Settings".to_string(),
+                    name: i18n::t("Settings").to_string(),
                     path: None,
                     confirmed: None,
                     is_pristine: true,
@@ -357,7 +362,7 @@ impl EditorTabChild {
                 EditorTabChildViewInfo {
                     icon: config.ui_svg(LapceIcons::SYMBOL_COLOR),
                     color: Some(config.color(LapceColor::LAPCE_ICON_ACTIVE)),
-                    name: "Theme Colors".to_string(),
+                    name: i18n::t("Theme Colors").to_string(),
                     path: None,
                     confirmed: None,
                     is_pristine: true,
@@ -368,7 +373,7 @@ impl EditorTabChild {
                 EditorTabChildViewInfo {
                     icon: config.ui_svg(LapceIcons::KEYBOARD),
                     color: Some(config.color(LapceColor::LAPCE_ICON_ACTIVE)),
-                    name: "Keyboard Shortcuts".to_string(),
+                    name: i18n::t("Keyboard Shortcuts").to_string(),
                     path: None,
                     confirmed: None,
                     is_pristine: true,

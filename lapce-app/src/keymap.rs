@@ -17,6 +17,7 @@ use lapce_core::mode::Modes;
 use crate::{
     command::LapceCommand,
     config::{LapceConfig, color::LapceColor},
+    i18n,
     keypress::{
         KeyPressData,
         keymap::{KeyMap, KeyMapPress},
@@ -61,11 +62,7 @@ pub fn keymap_view(editors: Editors, common: Rc<CommonData>) -> impl View {
 
                 let cmd_name_contains_pattern =
                     cmd.kind.str().replace('_', " ").contains(&pattern);
-                let cmd_desc_contains_pattern = cmd
-                    .kind
-                    .desc()
-                    .map(|desc| desc.to_lowercase().contains(&pattern))
-                    .unwrap_or(false);
+                let cmd_desc_contains_pattern = desc_contains(&cmd, &pattern);
                 let shortcut_contains_pattern = keymap
                     .key
                     .iter()
@@ -89,11 +86,7 @@ pub fn keymap_view(editors: Editors, common: Rc<CommonData>) -> impl View {
             .collect::<im::Vector<(LapceCommand, Option<KeyMap>)>>();
         items.extend(keypress.commands_without_keymap.iter().filter_map(|cmd| {
             let match_pattern = cmd.kind.str().replace('_', " ").contains(&pattern)
-                || cmd
-                    .kind
-                    .desc()
-                    .map(|desc| desc.to_lowercase().contains(&pattern))
-                    .unwrap_or(false);
+                || desc_contains(cmd, &pattern);
             if !match_pattern {
                 return None;
             }
@@ -113,8 +106,7 @@ pub fn keymap_view(editors: Editors, common: Rc<CommonData>) -> impl View {
                 container(
                     text(
                         cmd.kind
-                            .desc()
-                            .map(|desc| desc.to_string())
+                            .title()
                             .unwrap_or_else(|| cmd.kind.str().replace('_', " ")),
                     )
                     .style(|s| {
@@ -178,10 +170,10 @@ pub fn keymap_view(editors: Editors, common: Rc<CommonData>) -> impl View {
                 {
                     let keymap = keymap.clone();
                     let bits = [
-                        (Modes::INSERT, "Insert"),
-                        (Modes::NORMAL, "Normal"),
-                        (Modes::VISUAL, "Visual"),
-                        (Modes::TERMINAL, "Terminal"),
+                        (Modes::INSERT, i18n::pt("keymap-mode", "Insert")),
+                        (Modes::NORMAL, i18n::pt("keymap-mode", "Normal")),
+                        (Modes::VISUAL, i18n::pt("keymap-mode", "Visual")),
+                        (Modes::TERMINAL, i18n::pt("keymap-mode", "Terminal")),
                     ];
                     let modes = keymap
                         .as_ref()
@@ -281,7 +273,7 @@ pub fn keymap_view(editors: Editors, common: Rc<CommonData>) -> impl View {
     stack((
         container(
             text_input_view
-                .placeholder(|| "Search Key Bindings".to_string())
+                .placeholder(|| i18n::t("Search Key Bindings").to_string())
                 .keyboard_navigable()
                 .request_focus(|| {})
                 .style(move |s| {
@@ -293,7 +285,7 @@ pub fn keymap_view(editors: Editors, common: Rc<CommonData>) -> impl View {
         )
         .style(|s| s.padding_bottom(10.0).width_pct(100.0)),
         stack((
-            container(text("Command").style(move |s| {
+            container(text(i18n::t("Command")).style(move |s| {
                 s.text_ellipsis().padding_horiz(10.0).min_width(0.0)
             }))
             .style(move |s| {
@@ -305,7 +297,7 @@ pub fn keymap_view(editors: Editors, common: Rc<CommonData>) -> impl View {
                     .border_right(1.0)
                     .border_color(config.get().color(LapceColor::LAPCE_BORDER))
             }),
-            text("Key Binding").style(move |s| {
+            text(i18n::t("Key Binding")).style(move |s| {
                 s.width(200.0)
                     .items_center()
                     .padding_horiz(10.0)
@@ -313,7 +305,7 @@ pub fn keymap_view(editors: Editors, common: Rc<CommonData>) -> impl View {
                     .border_right(1.0)
                     .border_color(config.get().color(LapceColor::LAPCE_BORDER))
             }),
-            text("Modes").style(move |s| {
+            text(i18n::t("Modes")).style(move |s| {
                 s.width(200.0)
                     .items_center()
                     .padding_horiz(10.0)
@@ -322,7 +314,7 @@ pub fn keymap_view(editors: Editors, common: Rc<CommonData>) -> impl View {
                     .border_color(config.get().color(LapceColor::LAPCE_BORDER))
                     .apply_if(!modal.get(), |s| s.hide())
             }),
-            container(text("When").style(move |s| {
+            container(text(i18n::pt("keymap-column", "When")).style(move |s| {
                 s.text_ellipsis().padding_horiz(10.0).min_width(0.0)
             }))
             .style(move |s| {
@@ -384,8 +376,7 @@ fn keyboard_picker_view(
                     cmd.as_ref()
                         .map(|cmd| {
                             cmd.kind
-                                .desc()
-                                .map(|desc| desc.to_string())
+                                .title()
                                 .unwrap_or_else(|| cmd.kind.str().replace('_', " "))
                         })
                         .unwrap_or_default()
@@ -430,7 +421,7 @@ fn keyboard_picker_view(
                     .background(config.color(LapceColor::EDITOR_BACKGROUND))
             }),
             stack((
-                text("Save")
+                text(i18n::t("Save"))
                     .style(move |s| {
                         let config = config.get();
                         s.width(100.0)
@@ -465,7 +456,7 @@ fn keyboard_picker_view(
                             );
                         }
                     }),
-                text("Cancel")
+                text(i18n::t("Cancel"))
                     .style(move |s| {
                         let config = config.get();
                         s.margin_left(20.0)
@@ -559,4 +550,13 @@ fn keyboard_picker_view(
     });
 
     view
+}
+
+/// コマンド名が検索語を含むか。表示している訳と英語の原文のどちらでも探せるよう両方を見る。
+fn desc_contains(cmd: &LapceCommand, pattern: &str) -> bool {
+    let title = cmd.kind.title();
+    [title.as_deref(), cmd.kind.desc()]
+        .into_iter()
+        .flatten()
+        .any(|desc| desc.to_lowercase().contains(pattern))
 }

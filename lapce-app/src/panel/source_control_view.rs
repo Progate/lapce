@@ -30,6 +30,7 @@ use crate::{
     command::{CommandKind, InternalCommand, LapceCommand, LapceWorkbenchCommand},
     config::{color::LapceColor, icon::LapceIcons},
     editor::view::editor_view,
+    i18n,
     settings::checkbox,
     source_control::SourceControlData,
     window_tab::{Focus, WindowTabData},
@@ -86,15 +87,17 @@ pub fn source_control_panel(
                                 s.set(WrapProp, WrapMethod::WrapWidth { width })
                             })
                         }),
-                        label(|| "Commit Message".to_string()).style(move |s| {
-                            let config = config.get();
-                            s.absolute()
-                                .items_center()
-                                .height(config.editor.line_height() as f32)
-                                .color(config.color(LapceColor::EDITOR_DIM))
-                                .apply_if(!is_empty.get(), |s| s.hide())
-                                .selectable(false)
-                        }),
+                        label(|| i18n::t("Commit Message").to_string()).style(
+                            move |s| {
+                                let config = config.get();
+                                s.absolute()
+                                    .items_center()
+                                    .height(config.editor.line_height() as f32)
+                                    .color(config.color(LapceColor::EDITOR_DIM))
+                                    .apply_if(!is_empty.get(), |s| s.hide())
+                                    .selectable(false)
+                            },
+                        ),
                     ))
                     .style(|s| {
                         s.absolute()
@@ -172,7 +175,7 @@ pub fn source_control_panel(
             }),
             {
                 let source_control = source_control.clone();
-                label(|| "Commit".to_string())
+                label(|| i18n::t("Commit").to_string())
                     .on_click_stop(move |_| {
                         source_control.commit();
                     })
@@ -202,7 +205,7 @@ pub fn source_control_panel(
         ))
         .style(|s| s.flex_col().width_pct(100.0).padding(10.0)),
         foldable_panel_section(
-            text("Changes"),
+            text(i18n::t("Changes")),
             file_diffs_view(source_control),
             window_tab_data.panel.section_open(PanelSection::Changes),
             config,
@@ -345,8 +348,9 @@ fn file_diffs_view(source_control: SourceControlData) -> impl View {
 
             if let Event::PointerDown(pointer_event) = event {
                 if pointer_event.button.is_secondary() {
-                    let menu = Menu::new("")
-                        .entry(MenuItem::new("Discard Changes").action(discard));
+                    let menu = Menu::new("").entry(
+                        MenuItem::new(i18n::t("Discard Changes")).action(discard),
+                    );
                     show_context_menu(menu, None);
                 }
             }

@@ -1,15 +1,12 @@
-//! The language of Lapce's own UI (menus, panels, the palette, settings).
+//! Lapce 自身の画面（メニュー・パネル・コマンド パレット・設定）の言語。本物の Lapce には無い。
 //!
-//! Like gettext, the English text in the source is the message id: `t("Open
-//! Folder")` returns its translation in the UI language, or the English text
-//! itself when there is none, so a string nobody has translated yet still
-//! shows. The translations are TOML tables of English text to translated text
-//! in `defaults/locales/<language>/`.
+//! gettext と同じく、ソースに書いた英語の原文をそのままキーにする。`t("Open Folder")` は画面の言語の訳を返し、
+//! 訳が無ければ原文を返すので、訳し漏れた文字は英語のまま出る（空になったり壊れたりしない）。
+//! 訳は `defaults/locales/<言語>/` の TOML（英語の原文 = 訳文）に置く。
 //!
-//! The UI language is the `core.language` setting. Its default, `system`,
-//! follows the locale environment variables as other Linux programs do
-//! (`LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG`), so whoever starts Lapce
-//! decides the language and the user can still choose another in the settings.
+//! 画面の言語は設定の `core.language` で決める。既定の `system` は、ほかの Linux のプログラムと同じく
+//! ロケールの環境変数（`LANGUAGE`・`LC_ALL`・`LC_MESSAGES`・`LANG`）に従う。起動する側が言語を決め、
+//! 利用者は設定で別の言語を選べる
 
 use std::{
     collections::HashMap,
@@ -20,7 +17,7 @@ use std::{
     },
 };
 
-/// A language Lapce's UI is translated into.
+/// 画面を訳してある言語
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum Language {
     #[default]
@@ -29,10 +26,10 @@ pub enum Language {
 }
 
 impl Language {
-    /// Every language, in the order the settings list them.
+    /// すべての言語。設定の選択肢に並べる順
     pub const ALL: [Language; 2] = [Language::English, Language::Japanese];
 
-    /// The value of `core.language` that picks this language.
+    /// この言語を選ぶ `core.language` の値
     pub fn code(self) -> &'static str {
         match self {
             Language::English => "en",
@@ -40,7 +37,7 @@ impl Language {
         }
     }
 
-    /// The language's name in that language, as language pickers show it.
+    /// その言語での言語の名前。言語を選ぶ欄はどの言語でもこれを出す（読めない言語の中からでも自分の言語を探せる）
     pub fn native_name(self) -> &'static str {
         match self {
             Language::English => "English",
@@ -48,8 +45,7 @@ impl Language {
         }
     }
 
-    /// The language a locale name (`ja_JP.UTF-8`, `ja`, `en_US`) asks for, if
-    /// Lapce has it.
+    /// ロケールの名前（`ja_JP.UTF-8`・`ja`・`en_US`）が指す言語。訳が無い言語なら None
     fn from_locale(locale: &str) -> Option<Language> {
         let language = locale
             .split(['_', '.', '@', '-'])
@@ -61,9 +57,7 @@ impl Language {
             .find(|candidate| candidate.code() == language)
     }
 
-    /// The language the locale environment variables ask for, read in the
-    /// order gettext reads them. `C` and `POSIX` (and no locale at all) are
-    /// English.
+    /// ロケールの環境変数が指す言語。gettext と同じ順に読む。`C`・`POSIX`（とロケールが無いとき）は英語
     pub fn from_env() -> Language {
         Self::from_env_vars(|name| std::env::var(name).ok())
     }
@@ -76,8 +70,7 @@ impl Language {
         if matches!(locale.as_deref(), None | Some("C") | Some("POSIX")) {
             return Language::English;
         }
-        // LANGUAGE is a list of preferences (`ja:en`) and, as in gettext, only
-        // counts once a locale other than C is set.
+        // LANGUAGE は好みの言語の並び（`ja:en`）で、gettext と同じく C 以外のロケールがあるときだけ効く
         var("LANGUAGE")
             .iter()
             .flat_map(|list| list.split(':'))
@@ -86,8 +79,7 @@ impl Language {
             .unwrap_or(Language::English)
     }
 
-    /// The language a `core.language` value asks for: `system` (or anything
-    /// Lapce does not have) follows the environment.
+    /// `core.language` の値が指す言語。`system`（と訳の無い言語）は環境変数に従う
     pub fn from_setting(setting: &str) -> Language {
         Language::ALL
             .into_iter()
@@ -96,18 +88,18 @@ impl Language {
     }
 }
 
-/// The value of `core.language` that follows the environment.
+/// 環境変数に従う `core.language` の値
 pub const SYSTEM_LANGUAGE: &str = "system";
 
 static CURRENT: AtomicU8 = AtomicU8::new(0);
 
-/// Sets the UI language. Views built after this show it; the window rebuilds
-/// its views when the language in the config changes (see `app.rs`).
+/// 画面の言語を決める。ビューは作るときに文字を取るので、このあとに作るビューから変わる。
+/// 設定の言語が変わったら窓がビューを作り直す（→ app.rs の `window`）
 pub fn set_language(language: Language) {
     CURRENT.store(language as u8, Ordering::Relaxed);
 }
 
-/// The UI language.
+/// 画面の言語
 pub fn language() -> Language {
     match CURRENT.load(Ordering::Relaxed) {
         1 => Language::Japanese,
@@ -115,7 +107,7 @@ pub fn language() -> Language {
     }
 }
 
-/// The Japanese translations, one file per part of the UI.
+/// 日本語の訳。画面の部分ごとに 1 ファイル
 const JAPANESE_FILES: [&str; 3] = [
     include_str!("../../defaults/locales/ja/commands.toml"),
     include_str!("../../defaults/locales/ja/settings.toml"),
@@ -125,8 +117,7 @@ const JAPANESE_FILES: [&str; 3] = [
 static JAPANESE: LazyLock<HashMap<&'static str, &'static str>> =
     LazyLock::new(|| catalog(&JAPANESE_FILES));
 
-/// Reads translation files. The strings live as long as Lapce, so they are
-/// leaked once to hand out `&'static str`.
+/// 訳のファイルを読む。訳は Lapce が終わるまで使うので、1 度だけ leak して `&'static str` で渡す
 fn catalog(sources: &[&'static str]) -> HashMap<&'static str, &'static str> {
     let mut messages = HashMap::new();
     for source in sources {
@@ -138,15 +129,40 @@ fn catalog(sources: &[&'static str]) -> HashMap<&'static str, &'static str> {
             }
         };
         for (id, value) in table {
-            if let toml::Value::String(text) = value {
-                messages.insert(
-                    &*Box::leak(id.into_boxed_str()),
-                    &*Box::leak(text.into_boxed_str()),
-                );
+            match value {
+                toml::Value::String(text) => {
+                    messages.insert(leak(id), leak(text));
+                }
+                // `[context.<名前>]` は 1 つの文脈の訳（→ pt）
+                toml::Value::Table(contexts) if id == "context" => {
+                    for (context, table) in contexts {
+                        let toml::Value::Table(table) = table else {
+                            continue;
+                        };
+                        for (id, value) in table {
+                            if let toml::Value::String(text) = value {
+                                messages.insert(
+                                    leak(context_key(&context, &id)),
+                                    leak(text),
+                                );
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
     messages
+}
+
+fn leak(text: String) -> &'static str {
+    Box::leak(text.into_boxed_str())
+}
+
+/// 文脈つきの訳のキー。gettext と同じく EOT でつなぐ
+fn context_key(context: &str, id: &str) -> String {
+    format!("{context}\u{4}{id}")
 }
 
 fn translation(language: Language, id: &str) -> Option<&'static str> {
@@ -156,23 +172,28 @@ fn translation(language: Language, id: &str) -> Option<&'static str> {
     }
 }
 
-/// The UI text for `id` (its English text) in the UI language.
+/// `id`（英語の原文）の、画面の言語での文字
 pub fn t(id: &'static str) -> &'static str {
     translation(language(), id).unwrap_or(id)
 }
 
-/// Like [`t`] for text that is not known at compile time (setting names,
-/// command titles from a table). Returns the text itself when there is no
-/// translation.
+/// 組むときには決まっていない文字（設定の項目名など）の [`t`]。訳が無ければその文字を返す
 pub fn t_dynamic(id: &str) -> String {
     translation(language(), id)
         .map(str::to_string)
         .unwrap_or_else(|| id.to_string())
 }
 
-/// [`t`] for a message with values in it. In the English text each `{}` takes
-/// the next value; a translation can put them in another order with `{0}`,
-/// `{1}`, as word order differs between languages.
+/// 置き場で訳が変わる短い語の [`t_dynamic`]（gettext の `pgettext`）。ボタンの置き場の "Off"（出さない）と
+/// スイッチの "Off"（オフ）は訳が違う。訳はファイルの `[context.<文脈>]` に置く
+pub fn pt(context: &str, id: &str) -> String {
+    translation(language(), &context_key(context, id))
+        .map(str::to_string)
+        .unwrap_or_else(|| id.to_string())
+}
+
+/// 値を埋める文の [`t`]。原文の `{}` には順に値が入る。言語によって語順が違うので、訳では `{0}`・`{1}` で
+/// 何番目の値かを指して並べ替えてよい
 pub fn tf(id: &'static str, args: &[&dyn Display]) -> String {
     format_message(t(id), args)
 }
@@ -270,6 +291,38 @@ mod tests {
         assert_eq!(format_message("Go to line {}", &[&12]), "Go to line 12");
         assert_eq!(format_message("{1} の {0}", &[&"a", &"b"]), "b の a");
         assert_eq!(format_message("{} of {}", &[&1]), "1 of {}");
+    }
+
+    #[test]
+    fn reads_translations_in_a_context_apart_from_plain_ones() {
+        let messages = catalog(&[r#"
+"Off" = "オフ"
+
+[context.tab-close-button]
+"Off" = "出さない"
+"#]);
+        assert_eq!(messages.get("Off"), Some(&"オフ"));
+        assert_eq!(
+            messages.get(context_key("tab-close-button", "Off").as_str()),
+            Some(&"出さない")
+        );
+    }
+
+    // 同じ原文はどのファイルでも同じ訳にする（ファイルを読む順で、どちらの訳が出るかが変わってしまう）
+    #[test]
+    fn the_same_text_has_one_translation_across_files() {
+        let mut seen: HashMap<String, String> = HashMap::new();
+        for source in JAPANESE_FILES {
+            let table: toml::Table = toml::from_str(source).unwrap();
+            for (id, value) in table {
+                let toml::Value::String(text) = value else {
+                    continue;
+                };
+                if let Some(other) = seen.insert(id.clone(), text.clone()) {
+                    assert_eq!(other, text, "{id} has two translations");
+                }
+            }
+        }
     }
 
     #[test]
