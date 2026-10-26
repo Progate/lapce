@@ -178,6 +178,21 @@ impl Directory {
         }
     }
 
+    /// OS が配る文法の置き場（WASI）。ネイティブ版は文法を取ってきて `grammars_directory` に置くが、
+    /// BrowserOS の中からは取りに行けないので、OS のパッケージ（@progate/browser-editor）がここに並べる。
+    /// 利用者の置き場（`grammars_directory`）にあるものが先に使われる
+    #[cfg(target_os = "wasi")]
+    pub fn system_grammars_directory() -> PathBuf {
+        PathBuf::from("/usr/lib/lapce/grammars")
+    }
+
+    /// OS が配るハイライトの定義の置き場（WASI）。`system_grammars_directory` と対になる。
+    /// 利用者の置き場（`queries_directory`）にあるものが先に使われる
+    #[cfg(target_os = "wasi")]
+    pub fn system_queries_directory() -> PathBuf {
+        PathBuf::from("/usr/share/lapce/queries")
+    }
+
     pub fn grammars_directory() -> Option<PathBuf> {
         if let Some(dir) = Self::data_local_directory() {
             let dir = dir.join("grammars");

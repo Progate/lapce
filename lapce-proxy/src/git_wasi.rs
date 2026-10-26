@@ -13,6 +13,11 @@ use lapce_rpc::source_control::{DiffInfo, FileDiff};
 use crate::wasi_process::{self, Output};
 
 fn git(workspace_path: &Path, args: &[&str]) -> Result<Output> {
+    // 読み取り専用で開いたときはソース管理を出さないので、git を起こさない（状態を見るだけの呼び出しも、
+    // ファイルが変わるたびに子プロセスを起こして重くなるだけである。→ lapce_core::read_only）
+    if lapce_core::read_only::is_enabled() {
+        return Err(anyhow!("git is not used in a read-only workspace"));
+    }
     let mut argv = vec!["git"];
     argv.extend_from_slice(args);
     Ok(wasi_process::output(&argv, workspace_path, None)?)

@@ -36,7 +36,10 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
 | 自分を子プロセスで起動し直して端末を空ける | しない（子プロセスは std から起動できない） |
 | libgit2 | BrowserOS の `git` を Linux の syscall（`clone` の vfork の形と `execve`）で起こす（`lapce-proxy/src/git_wasi.rs`・`wasi_process.rs`。syscall は `linux_wasi.rs`） |
 | inotify / FSEvents（notify） | Linux の inotify（`inotify_init1(2)` ほか。`lapce-proxy/src/inotify_wasi.rs`） |
-| 文法を dlopen で読む | 主な言語の文法を静的に組み込み、ハイライトは文法の crate 同梱の定義を使う（`lapce-core/src/language.rs`） |
+| 文法を dlopen で読む | 同じく `libtree-sitter-<name>.so` を dlopen する。文法は wasm のサイドモジュールで、ローダーは BrowserOS の browser-dyld。利用者の置き場に無ければ OS が配る `/usr/lib/lapce/grammars`・`/usr/share/lapce/queries` を見る（`lapce-core/src/language.rs`・`directory.rs`）。組むのは @progate/browser-editor の `scripts/build-wasm.mjs` |
+| 窓の枠と帯 | 枠は WM か埋め込む側が持つので、帯は macOS 版と同じ並びにし、ロゴ・メニュー・窓のボタン・SSH・更新・Run and Debug を出さない（`lapce-app/src/title.rs`） |
+| 拡張・LSP・デバッガーの板 | 動かないので並びから外す（種類は残す。`lapce-app/src/panel/kind.rs` の `is_available`） |
+| （無い） | `--read-only` でワークスペースごと読み取り専用にする。proxy が書き換えを断り、端末と git を起こさない（`lapce-core/src/read_only.rs`） |
 | `directories` | Linux と同じ XDG の置き場（`lapce-core/src/xdg.rs`） |
 | ゴミ箱（trash） | freedesktop.org のゴミ箱（`~/.local/share/Trash`）へ自分で移す |
 | プラグイン（wasmtime） | 未対応（起動しようとすると理由付きで失敗する） |

@@ -141,6 +141,12 @@ struct Cli {
     #[clap(value_parser = lapce_proxy::cli::parse_file_line_column)]
     #[clap(value_hint = clap::ValueHint::AnyPath)]
     paths: Vec<PathObject>,
+
+    /// Open the workspace read-only: no editing, saving, terminal or source control
+    /// (BrowserOS only. → lapce_core::read_only)
+    #[cfg(target_os = "wasi")]
+    #[clap(long, action)]
+    read_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3735,6 +3741,11 @@ pub fn launch() {
     }
 
     let cli = Cli::parse();
+    // 板の並びや文書を作るより先に決める（どれも作るときに読む）
+    #[cfg(target_os = "wasi")]
+    if cli.read_only {
+        lapce_core::read_only::enable();
+    }
 
     if !cli.wait {
         logging::panic_hook();
