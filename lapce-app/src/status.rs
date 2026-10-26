@@ -212,10 +212,12 @@ pub fn status(
                 .on_click_stop(move |_| {
                     panel.show_panel(&PanelKind::Problem);
                 })
+                // 数えるのは LSP の診断で、WASI では LSP を起こせず常に 0 なので出さない（Problems の板も出さない。→ panel/kind.rs）
                 .style(move |s| {
                     s.height_pct(100.0)
                         .padding_horiz(10.0)
                         .items_center()
+                        .apply_if(cfg!(target_os = "wasi"), |s| s.hide())
                         .hover(|s| {
                             s.cursor(CursorStyle::Pointer).background(
                                 config
@@ -311,6 +313,8 @@ pub fn status(
                     || "Toggle Right Panel",
                     config,
                 )
+                // 右に置く板（Document Symbol）は WASI では働かず、右は空になるので切り替えも出さない
+                .style(|s| s.apply_if(cfg!(target_os = "wasi"), |s| s.hide()))
             },
         ))
         .style(move |s| {

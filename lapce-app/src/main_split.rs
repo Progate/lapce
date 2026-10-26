@@ -632,6 +632,15 @@ impl MainSplitData {
                 self.editors,
                 self.common.clone(),
             );
+            // 読み取り専用で開いたワークスペースは、proxy の答え（NewBufferResponse）を待たずに読み取り専用にする。
+            // 答えが着くまでのあいだに打った文字が文書に入ってしまうため
+            if lapce_core::read_only::is_enabled() {
+                doc.content.update(|content| {
+                    if let DocContent::File { read_only, .. } = content {
+                        *read_only = true;
+                    }
+                });
+            }
             let doc = Rc::new(doc);
             self.docs.update(|docs| {
                 docs.insert(path.clone(), doc.clone());

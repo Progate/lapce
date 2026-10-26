@@ -116,9 +116,22 @@ impl EditorInfo {
         let editors = &data.editors;
         let common = data.common.clone();
         match &self.content {
-            DocContent::File { path, .. } => {
+            DocContent::File { path, read_only } => {
                 let (doc, new_doc) =
                     data.get_doc(path.clone(), self.unsaved.clone());
+                // 覚え書きで読み取り専用と書いた文書は、読み取り専用のまま戻す。`get_doc` は読み取り専用かを
+                // proxy の答え（読めないファイルかどうか）だけで決めるので、戻さないと模範解答などを
+                // 見せるために置いた形でも書き換えられてしまう（→ browser-editor の `editorWorkspaceFiles`）
+                #[cfg(target_os = "wasi")]
+                if *read_only {
+                    doc.content.update(|content| {
+                        if let DocContent::File { read_only, .. } = content {
+                            *read_only = true;
+                        }
+                    });
+                }
+                #[cfg(not(target_os = "wasi"))]
+                let _ = read_only;
                 let editor = editors.make_from_doc(
                     data.scope,
                     doc,

@@ -90,8 +90,24 @@ impl TerminalConfig {
 
         let profile = profile.clone();
 
+        // WASI の std は `consts::OS` が空文字なので、OS の名前を付けると端末のタブの題が空になる。
+        // macOS の Terminal と同じく、起こすシェルの名前（`$SHELL` の最後の部分）を付ける
+        #[cfg(target_os = "wasi")]
+        let name = profile
+            .command
+            .clone()
+            .or_else(|| std::env::var("SHELL").ok())
+            .and_then(|shell| {
+                std::path::Path::new(&shell)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+            .unwrap_or_else(|| "sh".to_string());
+        #[cfg(not(target_os = "wasi"))]
+        let name = std::env::consts::OS.to_string();
+
         Some(lapce_rpc::terminal::TerminalProfile {
-            name: std::env::consts::OS.to_string(),
+            name,
             command: profile.command,
             arguments: profile.arguments,
             workdir,

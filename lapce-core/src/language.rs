@@ -246,10 +246,18 @@ pub enum LapceLanguage {
     Dockerfile,
     #[strum(message = "Dot")]
     Dot,
+    // EJS と ERB は文法（tree-sitter-embedded-template）を組み込んだ WASI 版にだけある（→ `load_grammar`）。
+    // ネイティブ版に足すと、文法を持たない .ejs / .erb がハイライトの無い別の言語として扱われてしまう
+    #[cfg(target_os = "wasi")]
+    #[strum(message = "EJS")]
+    Ejs,
     #[strum(message = "Elixir")]
     Elixir,
     #[strum(message = "Elm")]
     Elm,
+    #[cfg(target_os = "wasi")]
+    #[strum(message = "ERB")]
+    Erb,
     #[strum(message = "Erlang")]
     Erlang,
     #[strum(message = "Fish Shell")]
@@ -727,6 +735,21 @@ const LANGUAGES: &[SyntaxProperties] = &[
         comment: comment_properties!(),
         tree_sitter: TreeSitterProperties::DEFAULT,
     },
+    #[cfg(target_os = "wasi")]
+    SyntaxProperties {
+        id: LapceLanguage::Ejs,
+        indent: Indent::space(2),
+        files: &[],
+        extensions: &["ejs"],
+        comment: comment_properties!("<%#", "%>"),
+        tree_sitter: TreeSitterProperties {
+            grammar: Some("embedded_template"),
+            grammar_fn: Some("embedded_template"),
+            query: Some("ejs"),
+            code_glance: (DEFAULT_CODE_GLANCE_LIST, DEFAULT_CODE_GLANCE_IGNORE_LIST),
+            sticky_headers: &[],
+        },
+    },
     SyntaxProperties {
         id: LapceLanguage::Elixir,
         indent: Indent::space(2),
@@ -748,6 +771,21 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["elm"],
         comment: comment_properties!("#"),
         tree_sitter: TreeSitterProperties::DEFAULT,
+    },
+    #[cfg(target_os = "wasi")]
+    SyntaxProperties {
+        id: LapceLanguage::Erb,
+        indent: Indent::space(2),
+        files: &[],
+        extensions: &["erb"],
+        comment: comment_properties!("<%#", "%>"),
+        tree_sitter: TreeSitterProperties {
+            grammar: Some("embedded_template"),
+            grammar_fn: Some("embedded_template"),
+            query: Some("erb"),
+            code_glance: (DEFAULT_CODE_GLANCE_LIST, DEFAULT_CODE_GLANCE_IGNORE_LIST),
+            sticky_headers: &[],
+        },
     },
     SyntaxProperties {
         id: LapceLanguage::Erlang,
@@ -1828,12 +1866,23 @@ impl LapceLanguage {
 
         // Try reading highlights from user config dir
         if let Some(queries_dir) = Directory::queries_directory() {
-            // WASI 版は文法を組み込んでいるので、定義もその文法の crate に同梱されたものを使う。
-            // lapce/tree-sitter-grammars の定義は別の版の文法向けで、ノード名が合わない
+            // 利用者の置き場に無ければ、OS が文法と一緒に配る定義を読む（→ `Directory::system_queries_directory`）
             #[cfg(target_os = "wasi")]
             if !queries_dir.join(&query_name).exists() {
-                if let Some(queries) = builtin_grammar_query(&query_name) {
-                    return queries;
+                let system = Directory::system_queries_directory();
+                if system.join(&query_name).exists() {
+                    return (
+                        read_grammar_query(
+                            &system,
+                            &query_name,
+                            Self::HIGHLIGHTS_QUERIES_FILE_NAME,
+                        ),
+                        read_grammar_query(
+                            &system,
+                            &query_name,
+                            Self::HIGHLIGHTS_INJECTIONS_FILE_NAME,
+                        ),
+                    );
                 }
             }
             return (
@@ -1882,53 +1931,73 @@ impl LapceLanguage {
     }
 }
 
-/// WASI には共有ライブラリを読み込む仕組み（dlopen）が無いので、文法は wasm に
-/// 静的に組み込んである（→ Cargo.toml の `tree-sitter-*`）。探す記号の名前は
-/// ネイティブ版が dlsym で探すものと同じ `tree_sitter_<name>` である
+/// 文法を共有ライブラリ（`libtree-sitter-<name>.so`）として読み、`tree_sitter_<name>` を引く。
+/// ネイティブ版と同じ形で、読み込むのは BrowserOS の動的ローダー（@progate/browser-dyld）である。
+///
+/// 探すのは利用者の置き場（`grammars_directory`。ネイティブ版が取ってきた文法を置く所）、
+/// 次に OS が配る置き場（`Directory::system_grammars_directory`）。OS の置き場のファイルは
+/// 読まれたときに初めて取りに行くので、開いたファイルの言語の文法だけが届く
 #[cfg(target_os = "wasi")]
 fn load_grammar(
     grammar_name: &str,
     grammar_fn_name: &str,
-    _path: &Path,
+    path: &Path,
 ) -> Result<tree_sitter::Language, HighlightIssue> {
-    // 各 crate の中の C の関数。Rust の API（tree-sitter の別の版の型を返す）は使わない
+    use std::ffi::{CStr, CString, c_char, c_int, c_void};
+
+    // wasi-libc の宣言と同じもの。実体は browser-dyld の guest/dlfcn.c（build-wasm.mjs がリンクする）
     unsafe extern "C" {
-        fn tree_sitter_bash() -> tree_sitter::Language;
-        fn tree_sitter_c() -> tree_sitter::Language;
-        fn tree_sitter_css() -> tree_sitter::Language;
-        fn tree_sitter_html() -> tree_sitter::Language;
-        fn tree_sitter_javascript() -> tree_sitter::Language;
-        fn tree_sitter_json() -> tree_sitter::Language;
-        fn tree_sitter_python() -> tree_sitter::Language;
-        fn tree_sitter_rust() -> tree_sitter::Language;
-        fn tree_sitter_toml() -> tree_sitter::Language;
-        fn tree_sitter_tsx() -> tree_sitter::Language;
-        fn tree_sitter_typescript() -> tree_sitter::Language;
-        fn tree_sitter_yaml() -> tree_sitter::Language;
+        fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+        fn dlerror() -> *mut c_char;
     }
-    let language = unsafe {
-        match grammar_fn_name.replace('-', "_").as_str() {
-            "bash" => tree_sitter_bash(),
-            "c" => tree_sitter_c(),
-            "css" => tree_sitter_css(),
-            "html" => tree_sitter_html(),
-            "javascript" => tree_sitter_javascript(),
-            "json" => tree_sitter_json(),
-            "python" => tree_sitter_python(),
-            "rust" => tree_sitter_rust(),
-            "toml" => tree_sitter_toml(),
-            "tsx" => tree_sitter_tsx(),
-            "typescript" => tree_sitter_typescript(),
-            "yaml" => tree_sitter_yaml(),
-            _ => {
-                event!(Level::WARN, "Grammar {grammar_name} is not built into this WASI build");
-                return Err(HighlightIssue::Error(format!(
-                    "grammar {grammar_name} is not built into this build of Lapce"
-                )));
-            }
+    const RTLD_NOW: c_int = 2;
+
+    let file_name = format!("libtree-sitter-{grammar_name}.so");
+    let library_path = [
+        path.join(&file_name),
+        Directory::system_grammars_directory().join(&file_name),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.exists())
+    .ok_or(HighlightIssue::NotAvailable)?;
+
+    let last_error = || unsafe {
+        let message = dlerror();
+        if message.is_null() {
+            String::new()
+        } else {
+            CStr::from_ptr(message).to_string_lossy().into_owned()
         }
     };
-    Ok(language)
+    let c_path = CString::new(library_path.to_string_lossy().as_bytes())
+        .map_err(|err| HighlightIssue::Error(err.to_string()))?;
+    // 下ろさない（ネイティブ版も libloading の Library を忘れて持ち続ける）。Language が文法の関数を指し続けるため
+    let handle = unsafe { dlopen(c_path.as_ptr(), RTLD_NOW) };
+    if handle.is_null() {
+        return Err(HighlightIssue::Error(format!(
+            "failed to load {}: {}",
+            library_path.display(),
+            last_error()
+        )));
+    }
+    let symbol = CString::new(format!(
+        "tree_sitter_{}",
+        grammar_fn_name.replace('-', "_")
+    ))
+    .map_err(|err| HighlightIssue::Error(err.to_string()))?;
+    let language_fn = unsafe { dlsym(handle, symbol.as_ptr()) };
+    if language_fn.is_null() {
+        return Err(HighlightIssue::Error(format!(
+            "failed to find {} in {}: {}",
+            symbol.to_string_lossy(),
+            library_path.display(),
+            last_error()
+        )));
+    }
+    let language_fn: unsafe extern "C" fn() -> tree_sitter::Language =
+        unsafe { std::mem::transmute(language_fn) };
+    Ok(unsafe { language_fn() })
 }
 
 #[cfg(not(target_os = "wasi"))]
@@ -2087,39 +2156,6 @@ pub(crate) fn walk_tree_bracket_ast(
         }
         cursor.goto_parent();
     }
-}
-
-/// 組み込んだ文法（→ `load_grammar`）に同梱されているハイライトと差し込みの定義。
-/// TypeScript は JavaScript の定義を継ぎ足して使う前提で書かれている（nvim-treesitter の
-/// `inherits: ecma` と同じ）ので、固有のものを先に、共通のものを後ろに重ねる
-#[cfg(target_os = "wasi")]
-fn builtin_grammar_query(query_name: &str) -> Option<(String, String)> {
-    let join = |parts: &[&str]| parts.join("\n");
-    let js = tree_sitter_javascript::HIGHLIGHT_QUERY;
-    let jsx = tree_sitter_javascript::JSX_HIGHLIGHT_QUERY;
-    let js_injections = tree_sitter_javascript::INJECTIONS_QUERY;
-    let ts = tree_sitter_typescript::HIGHLIGHTS_QUERY;
-    Some(match query_name {
-        "bash" => (tree_sitter_bash::HIGHLIGHT_QUERY.to_owned(), String::new()),
-        "c" => (tree_sitter_c::HIGHLIGHT_QUERY.to_owned(), String::new()),
-        "css" => (tree_sitter_css::HIGHLIGHTS_QUERY.to_owned(), String::new()),
-        "html" => (
-            tree_sitter_html::HIGHLIGHTS_QUERY.to_owned(),
-            tree_sitter_html::INJECTIONS_QUERY.to_owned(),
-        ),
-        "javascript" | "jsx" => (join(&[jsx, js]), js_injections.to_owned()),
-        "json" => (tree_sitter_json::HIGHLIGHTS_QUERY.to_owned(), String::new()),
-        "python" => (tree_sitter_python::HIGHLIGHTS_QUERY.to_owned(), String::new()),
-        "rust" => (
-            tree_sitter_rust::HIGHLIGHTS_QUERY.to_owned(),
-            tree_sitter_rust::INJECTIONS_QUERY.to_owned(),
-        ),
-        "toml" => (tree_sitter_toml_ng::HIGHLIGHTS_QUERY.to_owned(), String::new()),
-        "typescript" => (join(&[ts, js]), js_injections.to_owned()),
-        "tsx" => (join(&[ts, jsx, js]), js_injections.to_owned()),
-        "yaml" => (tree_sitter_yaml::HIGHLIGHTS_QUERY.to_owned(), String::new()),
-        _ => return None,
-    })
 }
 
 fn read_grammar_query(queries_dir: &Path, name: &str, kind: &str) -> String {

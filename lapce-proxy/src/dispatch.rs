@@ -199,6 +199,14 @@ impl ProxyHandler for Dispatcher {
                     tracing::error!("{:?}", err);
                 }
             }
+            // 読み取り専用のときはシェルを起こさない（端末からはファイルを書き換えられる。端末の板も出さない）
+            #[cfg(target_os = "wasi")]
+            NewTerminal { term_id, .. } if lapce_core::read_only::is_enabled() => {
+                self.core_rpc.terminal_launch_failed(
+                    term_id,
+                    "the terminal is not available in a read-only workspace".to_string(),
+                );
+            }
             // BrowserOS の pty の上でシェルを動かす（→ terminal_wasi.rs）
             #[cfg(target_os = "wasi")]
             NewTerminal { term_id, profile } => {
@@ -453,11 +461,35 @@ impl ProxyHandler for Dispatcher {
 
     fn handle_request(&mut self, id: RequestId, rpc: ProxyRequest) {
         use ProxyRequest::*;
+        // 読み取り専用のときは、ファイルを書き換える頼みをここで断る。画面の側の口を取りこぼしても、
+        // ファイルは変わらない（→ lapce_core::read_only）
+        if lapce_core::read_only::is_enabled()
+            && matches!(
+                rpc,
+                Save { .. }
+                    | SaveBufferAs { .. }
+                    | CreateFile { .. }
+                    | CreateDirectory { .. }
+                    | TrashPath { .. }
+                    | DuplicatePath { .. }
+                    | RenamePath { .. }
+            )
+        {
+            self.respond_rpc(
+                id,
+                Err(RpcError {
+                    code: 0,
+                    message: "this workspace is read-only".to_string(),
+                }),
+            );
+            return;
+        }
         match rpc {
             NewBuffer { buffer_id, path } => {
                 let buffer = Buffer::new(buffer_id, path.clone());
                 let content = buffer.rope.to_string();
-                let read_only = buffer.read_only;
+                // 読み取り専用で開いたワークスペースの文書は、読めるファイルでも読み取り専用にする
+                let read_only = buffer.read_only || lapce_core::read_only::is_enabled();
                 self.catalog_rpc.did_open_document(
                     &path,
                     buffer.language_id.to_string(),

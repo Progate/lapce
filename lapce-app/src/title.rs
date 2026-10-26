@@ -25,6 +25,9 @@ use crate::{
     workspace::LapceWorkspace,
 };
 
+/// BrowserOS（WASI）の中で動いているか。窓の枠・SSH・更新・デバッガーなど、そこで使えないものの口を隠すのに使う
+const IS_WASI: bool = cfg!(target_os = "wasi");
+
 fn left(
     workspace: Arc<LapceWorkspace>,
     lapce_command: Listener<LapceCommand>,
@@ -35,6 +38,9 @@ fn left(
 ) -> impl View {
     let is_local = workspace.kind.is_local();
     let is_macos = cfg!(target_os = "macos");
+    // BrowserOS（WASI）の窓は枠と題を持たない（枠は WM が描くか、埋め込む側のタブが持つ）。
+    // 枠の中に Linux 版の帯を描くと macOS の枠と Windows 風のボタンが並ぶので、帯は macOS 版と同じ並びにする
+    let is_macos_like = is_macos || IS_WASI;
     stack((
         empty().style(move |s| {
             let should_hide = if is_macos {
@@ -51,7 +57,7 @@ fn left(
                     .color(config.color(LapceColor::LAPCE_ICON_ACTIVE))
             },
         ))
-        .style(move |s| s.margin_horiz(10.0).apply_if(is_macos, |s| s.hide())),
+        .style(move |s| s.margin_horiz(10.0).apply_if(is_macos_like, |s| s.hide())),
         not_clickable_icon(
             || LapceIcons::MENU,
             || false,
@@ -63,7 +69,7 @@ fn left(
         .style(move |s| {
             s.margin_left(4.0)
                 .margin_right(6.0)
-                .apply_if(is_macos, |s| s.hide())
+                .apply_if(is_macos_like, |s| s.hide())
         }),
         tooltip_label(
             config,
@@ -131,10 +137,12 @@ fn left(
                     None => Color::TRANSPARENT,
                 }
             };
+            // BrowserOS からは SSH の先へ繋げない（ソケットを外へ開けない）ので、繋ぐ口を出さない
             s.height_pct(100.0)
                 .padding_horiz(10.0)
                 .items_center()
                 .background(color)
+                .apply_if(IS_WASI, |s| s.hide())
                 .hover(|s| {
                     s.cursor(CursorStyle::Pointer).background(
                         config.color(LapceColor::PANEL_HOVERED_BACKGROUND),
@@ -208,13 +216,18 @@ fn middle(
             config,
         )
         .popout_menu(move || {
-            Menu::new("")
-                .entry(MenuItem::new("Open Folder").action(move || {
+            let menu = Menu::new("");
+            // WASI にはフォルダーを選ぶ画面が無く（rfd は None を返す）、選んでも何も開かないので出さない
+            let menu = if IS_WASI {
+                menu
+            } else {
+                menu.entry(MenuItem::new("Open Folder").action(move || {
                     workbench_command.send(LapceWorkbenchCommand::OpenFolder);
                 }))
-                .entry(MenuItem::new("Open Recent Workspace").action(move || {
-                    workbench_command.send(LapceWorkbenchCommand::PaletteWorkspace);
-                }))
+            };
+            menu.entry(MenuItem::new("Open Recent Workspace").action(move || {
+                workbench_command.send(LapceWorkbenchCommand::PaletteWorkspace);
+            }))
         })
     };
 
@@ -285,7 +298,8 @@ fn middle(
                 || "Run and Debug",
                 config,
             )
-            .style(move |s| s.margin_horiz(6.0)),
+            // WASI ではデバッガー（DAP）を起こせないので、走らせる口ごと出さない（下の Debug の板も同じ。→ panel/kind.rs）
+            .style(move |s| s.margin_horiz(6.0).apply_if(IS_WASI, |s| s.hide())),
             drag_window_area(empty())
                 .style(|s| s.height_pct(100.0).flex_basis(0.0).flex_grow(1.0f32)),
         ))
@@ -340,7 +354,7 @@ fn right(
                 config,
             )
             .popout_menu(move || {
-                Menu::new("")
+                let menu = Menu::new("")
                     .entry(MenuItem::new("Command Palette").action(move || {
                         workbench_command.send(LapceWorkbenchCommand::PaletteCommand)
                     }))
@@ -360,8 +374,12 @@ fn right(
                                 .send(LapceWorkbenchCommand::OpenThemeColorSettings)
                         },
                     ))
-                    .separator()
-                    .entry(if let Some(v) = latest_version.get_untracked() {
+                    .separator();
+                // WASI では新しい版を取りに行けない（HTTP が無い）ので、更新の項目は出さない
+                let menu = if IS_WASI {
+                    menu
+                } else {
+                    menu.entry(if let Some(v) = latest_version.get_untracked() {
                         if update_in_progress.get_untracked() {
                             MenuItem::new(format!("Update in progress ({v})"))
                                 .enabled(false)
@@ -377,9 +395,10 @@ fn right(
                         MenuItem::new("No update available").enabled(false)
                     })
                     .separator()
-                    .entry(MenuItem::new("About Lapce").action(move || {
-                        workbench_command.send(LapceWorkbenchCommand::ShowAbout)
-                    }))
+                };
+                menu.entry(MenuItem::new("About Lapce").action(move || {
+                    workbench_command.send(LapceWorkbenchCommand::ShowAbout)
+                }))
             }),
             container(label(|| "1".to_string()).style(move |s| {
                 let config = config.get();
@@ -525,6 +544,7 @@ pub fn window_controls_view(
     .style(move |s| {
         s.apply_if(
             cfg!(target_os = "macos")
+                || IS_WASI
                 || !config.get_untracked().core.custom_titlebar
                 || (is_title && num_window_tabs.get() > 1),
             |s| s.hide(),
