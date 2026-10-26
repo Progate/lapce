@@ -86,6 +86,7 @@ use crate::{
     },
     editor_tab::{EditorTabChild, EditorTabData},
     focus_text::focus_text,
+    i18n,
     id::{EditorTabId, SplitId},
     keymap::keymap_view,
     keypress::keymap::KeyMap,
@@ -3674,16 +3675,29 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
 fn window(window_data: WindowData) -> impl View {
     let window_tabs = window_data.window_tabs.read_only();
     let active = window_data.active.read_only();
-    let items = move || window_tabs.get();
-    let key = |(_, window_tab): &(RwSignal<usize>, Rc<WindowTabData>)| {
-        window_tab.window_tab_id
+    let config = window_data.config;
+    // Views take their text when they are built, so a new UI language (see
+    // `crate::i18n`) rebuilds them. The language is part of the key; the data
+    // the views show (documents, editors, panels) stays as it is.
+    let items = move || {
+        let language = config.with(|config| config.ui_language);
+        window_tabs
+            .get()
+            .into_iter()
+            .map(|(index, window_tab)| (index, window_tab, language))
+            .collect::<im::Vector<_>>()
     };
+    let key = |(_, window_tab, language): &(
+        RwSignal<usize>,
+        Rc<WindowTabData>,
+        i18n::Language,
+    )| (window_tab.window_tab_id, *language);
     let active = move || active.get();
     let window_focus = create_rw_signal(false);
     let ime_enabled = window_data.ime_enabled;
     let window_maximized = window_data.common.window_maximized;
 
-    tab(active, items, key, |(_, window_tab_data)| {
+    tab(active, items, key, |(_, window_tab_data, _)| {
         window_tab(window_tab_data)
     })
     .window_title(move || {

@@ -33,6 +33,7 @@ use crate::{
         editor::EditorConfig, icon::LapceIcons, terminal::TerminalConfig,
         ui::UIConfig,
     },
+    i18n,
     keypress::KeyPressFocus,
     main_split::Editors,
     plugin::InstalledVoltData,
@@ -183,8 +184,11 @@ impl SettingsData {
                 ),
             ] {
                 let pos = cx.create_rw_signal(Point::new(0.0, item_height_accum));
+                // The headings and the list of sections only show the kind, so
+                // they show it in the UI language
+                let shown_kind = i18n::t_dynamic(kind);
                 data_items.push_back(SettingsItem {
-                    kind: kind.to_string(),
+                    kind: shown_kind.clone(),
                     name: "".to_string(),
                     field: "".to_string(),
                     filter_text: "".to_string(),
@@ -195,7 +199,7 @@ impl SettingsData {
                     size: cx.create_rw_signal(Size::ZERO),
                     header: true,
                 });
-                data_kinds.push_back((kind.to_string(), pos));
+                data_kinds.push_back((shown_kind.clone(), pos));
                 for (name, desc) in fields.iter().zip(descs.iter()) {
                     let field = name.replace('_', "-");
 
@@ -212,12 +216,17 @@ impl SettingsData {
                         (SettingsValue::from(value.clone()), value)
                     };
 
-                    let name = format!(
-                        "{kind}: {}",
-                        name.replace('_', " ").to_title_case()
-                    );
+                    let english_name = name.replace('_', " ").to_title_case();
+                    let shown_name = i18n::t_dynamic(&english_name);
+                    let shown_desc = i18n::t_dynamic(desc);
+                    // Searching finds a setting by its English name too, which
+                    // is what the settings file and documentation use
+                    let filter_text = format!(
+                        "{kind} {english_name} {desc} {shown_kind} {shown_name} {shown_desc}"
+                    )
+                    .to_lowercase();
+                    let name = format!("{shown_kind}: {shown_name}");
                     let kind = kind.to_lowercase();
-                    let filter_text = format!("{kind} {name} {desc}").to_lowercase();
                     let filter_text =
                         format!("{filter_text}{}", filter_text.replace(' ', ""));
                     data_items.push_back(SettingsItem {
@@ -225,7 +234,7 @@ impl SettingsData {
                         name,
                         field,
                         filter_text,
-                        description: desc.to_string(),
+                        description: shown_desc,
                         value,
                         pos: cx.create_rw_signal(Point::ZERO),
                         size: cx.create_rw_signal(Size::ZERO),
@@ -1225,8 +1234,9 @@ fn dropdown_view(
         });
     }
 
+    let shown = dropdown.to_owned();
     stack((
-        label(move || current_value.get()).style(move |s| {
+        label(move || shown.label_of(&current_value.get())).style(move |s| {
             s.text_ellipsis()
                 .width_pct(100.0)
                 .padding_horiz(10.0)
@@ -1306,10 +1316,11 @@ fn dropdown_scroll(
 
     let kind = item.kind.clone();
     let field = item.field.clone();
+    let shown = dropdown.to_owned();
     let view_fn = move |item_string: String| {
         let kind = kind.clone();
         let field = field.clone();
-        let local_item_string = item_string.clone();
+        let local_item_string = shown.label_of(&item_string);
         label(move || local_item_string.clone())
             .on_click_stop(move |_| {
                 current_value.set(item_string.clone());

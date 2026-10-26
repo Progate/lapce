@@ -2,6 +2,7 @@
 
 [core]
 modal = false
+language = "system"
 color-theme = "Lapce Dark"
 icon-theme = "Lapce Codicons"
 custom-titlebar = true

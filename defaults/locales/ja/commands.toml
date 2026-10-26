@@ -1,0 +1,5 @@
+# Lapce の UI の日本語訳（→ lapce-app/src/i18n.rs）。
+# キーは英語の原文（ソースに書かれたまま）、値は訳文。値の {} は原文の {} と同じ順の値、{0} {1} は何番目の値か。
+# 訳語は Lapce が手本にした VS Code の日本語版に揃える。
+
+# コマンドパレットのコマンド名（lapce-app/src/command.rs の message）
