@@ -3000,14 +3000,15 @@ impl EditorData {
         for cmd in cmds {
             if let Some(cmd) = cmd {
                 menu = menu.entry(
-                    MenuItem::new(cmd.desc().unwrap_or_else(|| cmd.str())).action(
-                        move || {
-                            lapce_command.send(LapceCommand {
-                                kind: cmd.clone(),
-                                data: None,
-                            })
-                        },
-                    ),
+                    MenuItem::new(
+                        cmd.title().unwrap_or_else(|| cmd.str().to_string()),
+                    )
+                    .action(move || {
+                        lapce_command.send(LapceCommand {
+                            kind: cmd.clone(),
+                            data: None,
+                        })
+                    }),
                 );
             } else {
                 menu = menu.separator();

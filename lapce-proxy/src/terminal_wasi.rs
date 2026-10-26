@@ -31,7 +31,9 @@ use lapce_rpc::{
 };
 
 use crate::{
-    linux_wasi::{self, AT_FDCWD, O_CLOEXEC, O_NOCTTY, O_RDWR, SYS_IOCTL, SYS_OPENAT, address},
+    linux_wasi::{
+        self, AT_FDCWD, O_CLOEXEC, O_NOCTTY, O_RDWR, SYS_IOCTL, SYS_OPENAT, address,
+    },
     wasi_process,
 };
 
@@ -51,10 +53,22 @@ struct Winsize {
 
 /// 窓の大きさを変える（主からの `ioctl(TIOCSWINSZ)`。端末の上の前面のグループに SIGWINCH が届く）
 fn set_winsize(master: &File, rows: u16, cols: u16) -> io::Result<()> {
-    let size = Winsize { rows, cols, xpixel: 0, ypixel: 0 };
+    let size = Winsize {
+        rows,
+        cols,
+        xpixel: 0,
+        ypixel: 0,
+    };
     linux_wasi::call(
         SYS_IOCTL,
-        [master.as_raw_fd() as i64, TIOCSWINSZ, address(&size), 0, 0, 0],
+        [
+            master.as_raw_fd() as i64,
+            TIOCSWINSZ,
+            address(&size),
+            0,
+            0,
+            0,
+        ],
     )?;
     Ok(())
 }
@@ -64,7 +78,14 @@ fn openpty(rows: u16, cols: u16) -> io::Result<(File, String)> {
     let ptmx = linux_wasi::c_path("/dev/ptmx");
     let fd = linux_wasi::call(
         SYS_OPENAT,
-        [AT_FDCWD, address(ptmx.as_ptr()), O_RDWR | O_NOCTTY | O_CLOEXEC, 0, 0, 0],
+        [
+            AT_FDCWD,
+            address(ptmx.as_ptr()),
+            O_RDWR | O_NOCTTY | O_CLOEXEC,
+            0,
+            0,
+            0,
+        ],
     )?;
     let master = unsafe { File::from_raw_fd(fd as i32) };
     let unlock = 0i32;
@@ -128,7 +149,8 @@ pub fn start(
     rows: u16,
     core_rpc: CoreRpcHandler,
 ) -> Result<(TerminalSender, u32)> {
-    let (mut master, tty) = openpty(rows, cols).map_err(|error| anyhow!("openpty failed: {error}"))?;
+    let (mut master, tty) =
+        openpty(rows, cols).map_err(|error| anyhow!("openpty failed: {error}"))?;
     set_nonblocking(&master)?;
 
     let (shell, arguments) = program(&profile);
@@ -152,20 +174,29 @@ pub fn start(
 fn set_nonblocking(file: &File) -> io::Result<()> {
     let fd = file.as_raw_fd();
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+    if flags < 0
+        || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
+    {
         return Err(io::Error::last_os_error());
     }
     Ok(())
 }
 
 /// 読めるだけ読んで画面側へ送る。何か読めたら true、閉じたら `Err`
-fn pump(term_id: TermId, master: &mut File, core_rpc: &CoreRpcHandler) -> io::Result<bool> {
+fn pump(
+    term_id: TermId,
+    master: &mut File,
+    core_rpc: &CoreRpcHandler,
+) -> io::Result<bool> {
     let mut buffer = [0u8; 64 * 1024];
     let mut any = false;
     loop {
         match master.read(&mut buffer) {
             Ok(0) => {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "pty closed"));
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "pty closed",
+                ));
             }
             Ok(count) => {
                 core_rpc.update_terminal(term_id, buffer[..count].to_vec());
@@ -183,7 +214,9 @@ fn write_all(master: &mut File, mut bytes: &[u8]) {
         match master.write(bytes) {
             Ok(0) => return,
             Ok(count) => bytes = &bytes[count..],
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => futex_sleep(Duration::from_millis(1)),
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                futex_sleep(Duration::from_millis(1))
+            }
             Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
             Err(err) => {
                 tracing::error!("{:?}", err);
@@ -214,7 +247,9 @@ fn run(
                     }
                 }
                 // 親の側を閉じれば、端末の上のプロセスは OS が畳む（実機の SIGHUP と同じ）
-                Ok(TerminalMessage::Shutdown) | Err(TryRecvError::Disconnected) => return,
+                Ok(TerminalMessage::Shutdown) | Err(TryRecvError::Disconnected) => {
+                    return;
+                }
                 Err(TryRecvError::Empty) => break,
             }
         }

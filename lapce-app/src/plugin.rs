@@ -38,6 +38,7 @@ use crate::{
     config::{LapceConfig, color::LapceColor},
     db::LapceDb,
     editor::EditorData,
+    i18n,
     keypress::{KeyPressFocus, condition::Condition},
     main_split::Editors,
     markdown::{MarkdownContent, parse_markdown},
@@ -402,7 +403,7 @@ impl PluginData {
                     Err(err) => {
                         tracing::error!("{:?}", err);
                         core_rpc.notification(CoreNotification::ShowMessage {
-                            title: "Request Available Plugins".to_string(),
+                            title: i18n::t("Request Available Plugins").to_string(),
                             message: lsp_types::ShowMessageParams {
                                 typ: MessageType::ERROR,
                                 message: err.to_string(),
@@ -467,7 +468,8 @@ impl PluginData {
         );
         let resp = lapce_proxy::get_url(&url, None)?;
         if resp.status() != 200 {
-            let text = parse_markdown("Plugin doesn't have a README", 2.0, config);
+            let text =
+                parse_markdown(i18n::t("Plugin doesn't have a README"), 2.0, config);
             return Ok(text);
         }
         let text = resp.text()?;
@@ -620,7 +622,7 @@ impl PluginData {
         let mut menu = Menu::new("");
         if meta.version != latest.version {
             menu = menu
-                .entry(MenuItem::new("Upgrade Plugin").action({
+                .entry(MenuItem::new(i18n::t("Upgrade Plugin")).action({
                     let plugin = self.clone();
                     let info = latest.clone();
                     move || {
@@ -630,7 +632,7 @@ impl PluginData {
                 .separator();
         }
         menu = menu
-            .entry(MenuItem::new("Reload Plugin").action({
+            .entry(MenuItem::new(i18n::t("Reload Plugin")).action({
                 let plugin = self.clone();
                 let meta = meta.clone();
                 move || {
@@ -639,7 +641,7 @@ impl PluginData {
             }))
             .separator()
             .entry(
-                MenuItem::new("Enable")
+                MenuItem::new(i18n::t("Enable"))
                     .enabled(
                         self.disabled
                             .with_untracked(|disabled| disabled.contains(&volt_id)),
@@ -653,7 +655,7 @@ impl PluginData {
                     }),
             )
             .entry(
-                MenuItem::new("Disable")
+                MenuItem::new(i18n::t("Disable"))
                     .enabled(
                         self.disabled
                             .with_untracked(|disabled| !disabled.contains(&volt_id)),
@@ -668,7 +670,7 @@ impl PluginData {
             )
             .separator()
             .entry(
-                MenuItem::new("Enable For Workspace")
+                MenuItem::new(i18n::t("Enable For Workspace"))
                     .enabled(
                         self.workspace_disabled
                             .with_untracked(|disabled| disabled.contains(&volt_id)),
@@ -682,7 +684,7 @@ impl PluginData {
                     }),
             )
             .entry(
-                MenuItem::new("Disable For Workspace")
+                MenuItem::new(i18n::t("Disable For Workspace"))
                     .enabled(
                         self.workspace_disabled
                             .with_untracked(|disabled| !disabled.contains(&volt_id)),
@@ -696,7 +698,7 @@ impl PluginData {
                     }),
             )
             .separator()
-            .entry(MenuItem::new("Uninstall").action({
+            .entry(MenuItem::new(i18n::t("Uninstall")).action({
                 let plugin = self.clone();
                 move || {
                     plugin.uninstall_volt(meta.clone());
@@ -753,13 +755,13 @@ pub fn plugin_info_view(plugin: PluginData, volt: VoltID) -> impl View {
                     Some(l) => (true, l == v),
                     None => (false, false),
                 }) {
-                Some((true, true)) => "Installed ▼",
-                Some((true, false)) => "Upgrade ▼",
+                Some((true, true)) => i18n::t("Installed ▼"),
+                Some((true, false)) => i18n::t("Upgrade ▼"),
                 _ => {
                     if installing.map(|i| i.get()).unwrap_or(false) {
-                        "Installing"
+                        i18n::t("Installing")
                     } else {
-                        "Install"
+                        i18n::t("Install")
                     }
                 }
             }
@@ -896,7 +898,7 @@ pub fn plugin_info_view(plugin: PluginData, volt: VoltID) -> impl View {
                                     .to_string();
                                 let local_repo = repo.clone();
                                 stack((
-                                    text("Repository: "),
+                                    text(i18n::t("Repository: ")),
                                     web_link(
                                         move || repo.clone(),
                                         move || local_repo.clone(),
@@ -966,7 +968,7 @@ pub fn plugin_info_view(plugin: PluginData, volt: VoltID) -> impl View {
                                 move || {
                                     readme.get().unwrap_or_else(|| {
                                         parse_markdown(
-                                            "Loading README",
+                                            i18n::t("Loading README"),
                                             2.0,
                                             &config.get(),
                                         )

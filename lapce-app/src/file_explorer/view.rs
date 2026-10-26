@@ -28,6 +28,7 @@ use crate::{
     command::InternalCommand,
     config::{LapceConfig, color::LapceColor, icon::LapceIcons},
     editor_tab::{EditorTabChild, EditorTabData},
+    i18n,
     panel::{
         data::PanelSection, kind::PanelKind, position::PanelPosition,
         view::PanelBuilder,
@@ -69,7 +70,7 @@ pub fn file_explorer_panel(
     let source_control = window_tab_data.source_control.clone();
     PanelBuilder::new(config, position)
         .add_height_style(
-            "Open Editors",
+            i18n::t("Open Editors"),
             150.0,
             container(open_editors_view(window_tab_data.clone()))
                 .style(|s| s.size_full()),
@@ -77,7 +78,7 @@ pub fn file_explorer_panel(
             move |s| s.apply_if(!config.get().ui.open_editors_visible, |s| s.hide()),
         )
         .add(
-            "File Explorer",
+            i18n::t("File Explorer"),
             container(file_explorer_view(data, source_control))
                 .style(|s| s.size_full()),
             window_tab_data
@@ -531,7 +532,7 @@ fn open_editors_view(window_tab_data: Rc<WindowTabData>) -> impl View {
                 },
                 || false,
                 || false,
-                || "Close",
+                || i18n::t("Close"),
                 config,
             )
             .on_event_stop(EventListener::PointerEnter, move |_| {
@@ -594,7 +595,7 @@ fn open_editors_view(window_tab_data: Rc<WindowTabData>) -> impl View {
             move |(index, (_, editor_tab))| {
                 let plugin = plugin.clone();
                 stack((
-                    label(move || format!("Group {}", index + 1))
+                    label(move || i18n::tf("Group {}", &[&(index + 1)]))
                         .style(|s| s.margin_left(10.0)),
                     dyn_stack(
                         move || editor_tab.get().children,

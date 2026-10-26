@@ -1,0 +1,164 @@
+# Lapce の UI の日本語訳（→ lapce-app/src/i18n.rs）。
+# キーは英語の原文（ソースに書かれたまま）、値は訳文。値の {} は原文の {} と同じ順の値、{0} {1} は何番目の値か。
+# 訳語は Lapce が手本にした VS Code の日本語版に揃える。
+
+# 画面の文字（メニュー・板・帯・案内）
+
+# 共通の操作
+"Close" = "閉じる"
+"Close All" = "すべて閉じる"
+"Don't Save" = "保存しない"
+"Restart" = "再起動"
+"Stop" = "停止"
+"Remove" = "削除"
+"Options" = "オプション"
+
+# メニュー（アプリ・ファイル・編集）
+"Settings..." = "設定..."
+"Quit Lapce" = "Lapce を終了"
+"Hide Lapce" = "Lapce を隠す"
+"Hide Others" = "ほかを隠す"
+"Show All" = "すべてを表示"
+"File" = "ファイル"
+"Open" = "開く"
+"Save All" = "すべて保存"
+"Edit" = "編集"
+"Find" = "検索"
+
+# タイトル バー
+"Menu" = "メニュー"
+"Connect to Remote" = "リモートに接続"
+"Disconnect remote" = "リモートから切断"
+"Jump Backward" = "戻る"
+"Jump Forward" = "進む"
+"Open Folder / Recent Workspace" = "フォルダーを開く / 最近使用したワークスペース"
+"Settings" = "設定"
+"Update in progress ({})" = "更新しています ({})"
+"Restart to update ({})" = "再起動して更新 ({})"
+"No update available" = "利用可能な更新はありません"
+"Minimize" = "最小化"
+"Maximize" = "最大化"
+"New Tab" = "新しいタブ"
+"New Workspace Tab" = "新しいワークスペース タブ"
+
+# Lapce について
+"Version: {}" = "バージョン: {}"
+"Website" = "Web サイト"
+"Attributions" = "クレジット"
+
+# エディターのタブ
+"Previous Tab" = "前のタブ"
+"Next Tab" = "次のタブ"
+"Split Horizontally" = "左右に分割"
+"Close Other Tabs" = "その他を閉じる"
+"Close All Tabs" = "すべて閉じる"
+"Close Tabs to the Right" = "右側を閉じる"
+"Close Tabs to the Left" = "左側を閉じる"
+"{} (Diff)" = "{} (差分)"
+"{} - {} (Diff)" = "{} - {} (差分)"
+"Theme Colors" = "テーマの色"
+"Keyboard Shortcuts" = "キーボード ショートカット"
+"Do you want to save the changes you made to {}?" = "{} に加えた変更を保存しますか?"
+"Your changes will be lost if you don't save them." = "保存しないと変更内容が失われます。"
+"Save File" = "ファイルを保存"
+"Choose a folder" = "フォルダーを選択"
+"Choose a file" = "ファイルを選択"
+"No matching results" = "一致する結果はありません"
+
+# 検索と置換
+"Case Sensitive" = "大文字と小文字を区別する"
+"Whole Word" = "単語単位で検索する"
+"Use Regex" = "正規表現を使用する"
+"Toggle Replace" = "置換の切り替え"
+"No Results" = "結果なし"
+"{} of {}" = "{} / {} 件"
+"Previous Match" = "前の一致項目"
+"Next Match" = "次の一致項目"
+"Replace Next" = "次を置換"
+"Replace All" = "すべて置換"
+
+# 差分
+"{} Hidden Lines" = "{} 行が非表示"
+"Expand All" = "すべて展開"
+"Expand Up" = "上に展開"
+"Expand Down" = "下に展開"
+
+# エクスプローラー
+"Open Editors" = "開いているエディター"
+"File Explorer" = "エクスプローラー"
+"Group {}" = "グループ {}"
+"New Directory" = "新しいフォルダー"
+"Reveal in system file explorer" = "ファイル エクスプローラーで表示"
+"Rename" = "名前の変更"
+"Duplicate" = "複製"
+"Move Directory to Trash" = "フォルダーをごみ箱に移動"
+"Move File to Trash" = "ファイルをごみ箱に移動"
+"Copy Path" = "パスのコピー"
+"Copy Relative Path" = "相対パスをコピー"
+"Select for Compare" = "比較対象の選択"
+"Compare with Selected" = "選択項目と比較"
+"Refresh" = "最新の情報に更新"
+
+# パネル（絵の並びの名前）
+"Source Control" = "ソース管理"
+"Plugins" = "プラグイン"
+"Problems" = "問題"
+"Debug" = "デバッグ"
+"Call Hierarchy" = "呼び出し階層"
+"Document Symbol" = "ドキュメント シンボル"
+"References" = "参照"
+"Implementation" = "実装"
+
+# ソース管理
+"Commit Message" = "コミット メッセージ"
+"Commit" = "コミット"
+"Changes" = "変更"
+"Discard Changes" = "変更を破棄"
+
+# 問題
+"Errors" = "エラー"
+"Warnings" = "警告"
+
+# ターミナル
+"New Terminal" = "新しいターミナル"
+"Clear All" = "すべてクリア"
+"Terminal failed to launch. Error: {}" = "ターミナルを起動できませんでした。エラー: {}"
+"Failed to expand variables in run debug definition {}: {}" = "実行とデバッグの定義 {} の変数を展開できませんでした: {}"
+
+# デバッグ
+"Processes" = "プロセス"
+"Variables" = "変数"
+"Stack Frames" = "スタック フレーム"
+"Breakpoints" = "ブレークポイント"
+"Continue" = "続行"
+"Pause" = "一時停止"
+"Step Over" = "ステップ オーバー"
+"Step Into" = "ステップ イン"
+"Step Out" = "ステップ アウト"
+
+# プラグイン
+"Installed" = "インストール済み"
+"Available" = "利用可能"
+"Disabled" = "無効"
+"Upgrade" = "更新"
+"Installing" = "インストール中"
+"Install" = "インストール"
+"Search extensions" = "プラグインを検索"
+"Request Available Plugins" = "利用可能なプラグインの取得"
+"Plugin doesn't have a README" = "このプラグインには README がありません"
+"Upgrade Plugin" = "プラグインを更新"
+"Reload Plugin" = "プラグインを再読み込み"
+"Enable" = "有効にする"
+"Disable" = "無効にする"
+"Enable For Workspace" = "有効にする (ワークスペース)"
+"Disable For Workspace" = "無効にする (ワークスペース)"
+"Uninstall" = "アンインストール"
+"Installed ▼" = "インストール済み ▼"
+"Upgrade ▼" = "更新 ▼"
+"Repository: " = "リポジトリ: "
+"Loading README" = "README を読み込んでいます"
+
+# ステータス バー
+"Ln {}, Col {}, Char {}" = "行 {}、列 {}、文字 {}"
+"{} ({} selected)" = "{} ({} 個選択)"
+"{} {} selections" = "{} {} 個の選択項目"

@@ -18,6 +18,7 @@ use crate::{
     app::{clickable_icon, not_clickable_icon, tooltip_label, window_menu},
     command::{LapceCommand, LapceWorkbenchCommand, WindowCommand},
     config::{LapceConfig, color::LapceColor, icon::LapceIcons},
+    i18n,
     listener::Listener,
     main_split::MainSplitData,
     update::ReleaseInfo,
@@ -62,7 +63,7 @@ fn left(
             || LapceIcons::MENU,
             || false,
             || false,
-            || "Menu",
+            || i18n::t("Menu"),
             config,
         )
         .popout_menu(move || window_menu(lapce_command, workbench_command))
@@ -87,12 +88,12 @@ fn left(
                     })
                 },
             )),
-            || "Connect to Remote",
+            || i18n::t("Connect to Remote"),
         )
         .popout_menu(move || {
             #[allow(unused_mut)]
             let mut menu = Menu::new("").entry(
-                MenuItem::new("Connect to SSH Host").action(move || {
+                MenuItem::new(i18n::t("Connect to SSH Host")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::ConnectSshHost);
                 }),
             );
@@ -101,21 +102,23 @@ fn left(
                     matches!(p, ProxyStatus::Connecting | ProxyStatus::Connected)
                 })
             {
-                menu = menu.entry(MenuItem::new("Disconnect remote").action(
-                    move || {
+                menu = menu.entry(
+                    MenuItem::new(i18n::t("Disconnect remote")).action(move || {
                         workbench_command
                             .send(LapceWorkbenchCommand::DisconnectRemote);
-                    },
-                ));
+                    }),
+                );
             }
             #[cfg(windows)]
             {
-                menu = menu.entry(MenuItem::new("Connect to WSL Host").action(
-                    move || {
-                        workbench_command
-                            .send(LapceWorkbenchCommand::ConnectWslHost);
-                    },
-                ));
+                menu = menu.entry(
+                    MenuItem::new(i18n::t("Connect to WSL Host")).action(
+                        move || {
+                            workbench_command
+                                .send(LapceWorkbenchCommand::ConnectWslHost);
+                        },
+                    ),
+                );
             }
             menu
         })
@@ -188,7 +191,7 @@ fn middle(
             },
             || false,
             move || !can_jump_backward.get(),
-            || "Jump Backward",
+            || i18n::t("Jump Backward"),
             config,
         )
         .style(move |s| s.margin_horiz(6.0))
@@ -201,7 +204,7 @@ fn middle(
             },
             || false,
             move || !can_jump_forward.get(),
-            || "Jump Forward",
+            || i18n::t("Jump Forward"),
             config,
         )
         .style(move |s| s.margin_right(6.0))
@@ -212,7 +215,7 @@ fn middle(
             || LapceIcons::PALETTE_MENU,
             || false,
             || false,
-            || "Open Folder / Recent Workspace",
+            || i18n::t("Open Folder / Recent Workspace"),
             config,
         )
         .popout_menu(move || {
@@ -221,13 +224,15 @@ fn middle(
             let menu = if IS_WASI {
                 menu
             } else {
-                menu.entry(MenuItem::new("Open Folder").action(move || {
+                menu.entry(MenuItem::new(i18n::t("Open Folder")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::OpenFolder);
                 }))
             };
-            menu.entry(MenuItem::new("Open Recent Workspace").action(move || {
-                workbench_command.send(LapceWorkbenchCommand::PaletteWorkspace);
-            }))
+            menu.entry(MenuItem::new(i18n::t("Open Recent Workspace")).action(
+                move || {
+                    workbench_command.send(LapceWorkbenchCommand::PaletteWorkspace);
+                },
+            ))
         })
     };
 
@@ -257,7 +262,7 @@ fn middle(
                     if let Some(s) = local_workspace.display() {
                         s
                     } else {
-                        "Open Folder".to_string()
+                        i18n::t("Open Folder").to_string()
                     }
                 })
                 .style(|s| s.padding_left(10).padding_right(5).selectable(false)),
@@ -295,7 +300,7 @@ fn middle(
                 },
                 || false,
                 || false,
-                || "Run and Debug",
+                || i18n::t("Run and Debug"),
                 config,
             )
             // WASI ではデバッガー（DAP）を起こせないので、走らせる口ごと出さない（下の Debug の板も同じ。→ panel/kind.rs）
@@ -350,30 +355,39 @@ fn right(
                 || LapceIcons::SETTINGS,
                 || false,
                 || false,
-                || "Settings",
+                || i18n::t("Settings"),
                 config,
             )
             .popout_menu(move || {
                 let menu = Menu::new("")
-                    .entry(MenuItem::new("Command Palette").action(move || {
-                        workbench_command.send(LapceWorkbenchCommand::PaletteCommand)
-                    }))
+                    .entry(MenuItem::new(i18n::t("Command Palette")).action(
+                        move || {
+                            workbench_command
+                                .send(LapceWorkbenchCommand::PaletteCommand)
+                        },
+                    ))
                     .separator()
-                    .entry(MenuItem::new("Open Settings").action(move || {
-                        workbench_command.send(LapceWorkbenchCommand::OpenSettings)
-                    }))
-                    .entry(MenuItem::new("Open Keyboard Shortcuts").action(
+                    .entry(MenuItem::new(i18n::t("Open Settings")).action(
+                        move || {
+                            workbench_command
+                                .send(LapceWorkbenchCommand::OpenSettings)
+                        },
+                    ))
+                    .entry(MenuItem::new(i18n::t("Open Keyboard Shortcuts")).action(
                         move || {
                             workbench_command
                                 .send(LapceWorkbenchCommand::OpenKeyboardShortcuts)
                         },
                     ))
-                    .entry(MenuItem::new("Open Theme Color Settings").action(
-                        move || {
-                            workbench_command
-                                .send(LapceWorkbenchCommand::OpenThemeColorSettings)
-                        },
-                    ))
+                    .entry(
+                        MenuItem::new(i18n::t("Open Theme Color Settings")).action(
+                            move || {
+                                workbench_command.send(
+                                    LapceWorkbenchCommand::OpenThemeColorSettings,
+                                )
+                            },
+                        ),
+                    )
                     .separator();
                 // WASI では新しい版を取りに行けない（HTTP が無い）ので、更新の項目は出さない
                 let menu = if IS_WASI {
@@ -381,22 +395,21 @@ fn right(
                 } else {
                     menu.entry(if let Some(v) = latest_version.get_untracked() {
                         if update_in_progress.get_untracked() {
-                            MenuItem::new(format!("Update in progress ({v})"))
+                            MenuItem::new(i18n::tf("Update in progress ({})", &[&v]))
                                 .enabled(false)
                         } else {
-                            MenuItem::new(format!("Restart to update ({v})")).action(
-                                move || {
+                            MenuItem::new(i18n::tf("Restart to update ({})", &[&v]))
+                                .action(move || {
                                     workbench_command
                                         .send(LapceWorkbenchCommand::RestartToUpdate)
-                                },
-                            )
+                                })
                         }
                     } else {
-                        MenuItem::new("No update available").enabled(false)
+                        MenuItem::new(i18n::t("No update available")).enabled(false)
                     })
                     .separator()
                 };
-                menu.entry(MenuItem::new("About Lapce").action(move || {
+                menu.entry(MenuItem::new(i18n::t("About Lapce")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::ShowAbout)
                 }))
             }),
@@ -506,7 +519,7 @@ pub fn window_controls_view(
             },
             || false,
             || false,
-            || "Minimize",
+            || i18n::t("Minimize"),
             config,
         )
         .style(|s| s.margin_right(16.0).margin_left(10.0)),
@@ -525,7 +538,7 @@ pub fn window_controls_view(
             },
             || false,
             || false,
-            || "Maximize",
+            || i18n::t("Maximize"),
             config,
         )
         .style(|s| s.margin_right(16.0)),
@@ -536,7 +549,7 @@ pub fn window_controls_view(
             },
             || false,
             || false,
-            || "Close Window",
+            || i18n::t("Close Window"),
             config,
         )
         .style(|s| s.margin_right(6.0)),

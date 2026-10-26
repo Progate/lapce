@@ -4,7 +4,8 @@
 [BrowserOS](https://github.com/Progate/packages/tree/main/packages/browser-os)（ブラウザーの中で動く小さな OS）の
 windowserver に窓を開いて動かすための変更である。使う側は `@progate/browser-editor`。
 
-変更はすべて `#[cfg(target_os = "wasi")]` の下にあり、**ネイティブ版の振る舞いは変えていない**。
+WASI のための変更はすべて `#[cfg(target_os = "wasi")]` の下にあり、**ネイティブ版の振る舞いは変えていない**。
+例外は画面の言語（→ 下の「画面の言語」）で、こちらはネイティブ版でも効く。
 
 ## 組み方
 
@@ -28,6 +29,19 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
   画素は `platform::wasi::WindowExtWasi::present_rgba` で渡し、前のフレームから変わった行だけを送る
 - **floem** は WASI では GPU を使わず tiny-skia で描く（BrowserOS の中のプロセスから WebGPU は呼べない）
 - 倍率は `WINIT_SCALE_FACTOR` で受け取る（画面の画素と見た目の 1px の比はホストが決める）
+
+## 画面の言語（本物の Lapce には無い）
+
+メニュー・パネル・コマンド パレット・設定などの画面の文字を、日本語でも出せるようにした（`lapce-app/src/i18n.rs`）。
+これは WASI に限らない変更で、ネイティブ版でも効く。
+
+- 言語は設定の `core.language`（`system`・`en`・`ja`）で選ぶ。既定の `system` は、ほかの Linux のプログラムと同じく
+  ロケールの環境変数（`LC_ALL`・`LC_MESSAGES`・`LANG`・`LANGUAGE`）に従う。起動する側が `LANG=ja_JP.UTF-8` を渡せば日本語で開き、
+  利用者は設定で英語に戻せる
+- gettext と同じく、ソースに書いた英語の原文がキーで、訳は `defaults/locales/ja/*.toml` に置く。訳の無い文字は英語のまま出る
+- 言語は起動したときに決まる。設定で選び直した言語は、VS Code の表示言語と同じく次に起動したときから効く
+  （Lapce は窓のビューとデータを一緒に作るので、動いている途中でビューだけを作り直せない）
+- コマンド パレットとキーボード ショートカットは、訳したコマンド名でも英語の名前でも探せる
 
 ## OS に無いもの・代わりにしたもの
 

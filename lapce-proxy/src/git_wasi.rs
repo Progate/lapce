@@ -37,7 +37,11 @@ fn git_ok(workspace_path: &Path, args: &[&str]) -> Result<String> {
 }
 
 fn lines(text: &str) -> Vec<String> {
-    text.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned).collect()
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// リポジトリの根。ワークスペースがリポジトリの中に無ければ `None`
@@ -73,10 +77,16 @@ pub(crate) fn git_commit(
             }
             FileDiff::Renamed(new, old) => {
                 git_ok(workspace_path, &["add", "--", &new.to_string_lossy()])?;
-                git_ok(workspace_path, &["rm", "--cached", "--", &old.to_string_lossy()])?;
+                git_ok(
+                    workspace_path,
+                    &["rm", "--cached", "--", &old.to_string_lossy()],
+                )?;
             }
             FileDiff::Deleted(path) => {
-                git_ok(workspace_path, &["rm", "--cached", "--", &path.to_string_lossy()])?;
+                git_ok(
+                    workspace_path,
+                    &["rm", "--cached", "--", &path.to_string_lossy()],
+                )?;
             }
         }
     }
@@ -93,7 +103,9 @@ pub(crate) fn git_discard_files_changes<'a>(
     workspace_path: &Path,
     files: impl Iterator<Item = &'a Path>,
 ) -> Result<()> {
-    let files: Vec<String> = files.map(|path| path.to_string_lossy().into_owned()).collect();
+    let files: Vec<String> = files
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
     if files.is_empty() {
         return Ok(());
     }
@@ -148,7 +160,9 @@ pub(crate) fn git_diff_new(workspace_path: &Path) -> Option<DiffInfo> {
     let branches = git_ok(&root, &["branch", "--format=%(refname:short)"])
         .map(|text| lines(&text))
         .unwrap_or_default();
-    let tags = git_ok(&root, &["tag"]).map(|text| lines(&text)).unwrap_or_default();
+    let tags = git_ok(&root, &["tag"])
+        .map(|text| lines(&text))
+        .unwrap_or_default();
     let status = match git_ok(&root, &["status", "--porcelain"]) {
         Ok(status) => status,
         Err(err) => {
@@ -161,33 +175,57 @@ pub(crate) fn git_diff_new(workspace_path: &Path) -> Option<DiffInfo> {
         .flat_map(|line| parse_status_line(&root, line))
         .collect();
     diffs.sort_by_key(|diff| diff.path().clone());
-    Some(DiffInfo { head, branches, tags, diffs })
+    Some(DiffInfo {
+        head,
+        branches,
+        tags,
+        diffs,
+    })
 }
 
 pub(crate) fn file_get_head(
     workspace_path: &Path,
     path: &Path,
 ) -> Result<(String, String)> {
-    let root = toplevel(workspace_path).ok_or_else(|| anyhow!("not a git repository"))?;
-    let relative = path.strip_prefix(&root)?.to_string_lossy().replace('\\', "/");
+    let root =
+        toplevel(workspace_path).ok_or_else(|| anyhow!("not a git repository"))?;
+    let relative = path
+        .strip_prefix(&root)?
+        .to_string_lossy()
+        .replace('\\', "/");
     let spec = format!("HEAD:{relative}");
     let id = git_ok(&root, &["rev-parse", &spec])?.trim().to_owned();
     let content = git_ok(&root, &["show", &spec])?;
     Ok((id, content))
 }
 
-pub(crate) fn git_get_remote_file_url(workspace_path: &Path, file: &Path) -> Result<String> {
-    let root = toplevel(workspace_path).ok_or_else(|| anyhow!("not a git repository"))?;
+pub(crate) fn git_get_remote_file_url(
+    workspace_path: &Path,
+    file: &Path,
+) -> Result<String> {
+    let root =
+        toplevel(workspace_path).ok_or_else(|| anyhow!("not a git repository"))?;
     let remote = git_ok(&root, &["config", "--get", "remote.origin.url"])?;
     let remote = remote.trim();
     let url = match lsp_types::Url::parse(remote) {
         Ok(url) => url,
         // `git@host:owner/repo` の形
-        Err(_) => lsp_types::Url::parse(&format!("ssh://{}", remote.replacen(':', "/", 1)))?,
+        Err(_) => lsp_types::Url::parse(&format!(
+            "ssh://{}",
+            remote.replacen(':', "/", 1)
+        ))?,
     };
-    let host = url.host_str().ok_or_else(|| anyhow!("Couldn't find remote host"))?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| anyhow!("Couldn't find remote host"))?;
     let namespace = url.path().strip_suffix(".git").unwrap_or(url.path());
     let commit = git_ok(&root, &["rev-parse", "HEAD"])?;
-    let file_path = file.strip_prefix(&root)?.to_string_lossy().replace('\\', "/");
-    Ok(format!("https://{host}{namespace}/blob/{}/{file_path}", commit.trim()))
+    let file_path = file
+        .strip_prefix(&root)?
+        .to_string_lossy()
+        .replace('\\', "/");
+    Ok(format!(
+        "https://{host}{namespace}/blob/{}/{file_path}",
+        commit.trim()
+    ))
 }

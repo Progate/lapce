@@ -62,6 +62,12 @@ impl CommandKind {
         }
     }
 
+    /// UI の言語でのコマンド名。`desc()` は英語の原文のままで、コマンドの照合や
+    /// 英語での検索に使うため、表示するところではこちらを使う。
+    pub fn title(&self) -> Option<String> {
+        self.desc().map(command_title)
+    }
+
     pub fn str(&self) -> &'static str {
         match &self {
             CommandKind::Workbench(cmd) => cmd.into(),
@@ -74,6 +80,18 @@ impl CommandKind {
         }
     }
 }
+/// コマンド名 `desc`（英語の原文）を UI の言語で返す。
+///
+/// "Up" や "Left" のように他の画面でも使う短い語がコマンド名にあり、コマンドとしての訳
+/// （「上へ移動」）を共通の訳に置くと他の画面の "Up" まで変わるので、文脈 `command` の訳を先に引く
+pub fn command_title(desc: &'static str) -> String {
+    let in_context = crate::i18n::pt("command", desc);
+    if in_context != desc {
+        return in_context;
+    }
+    crate::i18n::t(desc).to_string()
+}
+
 impl From<Command> for CommandKind {
     fn from(cmd: Command) -> Self {
         use Command::*;

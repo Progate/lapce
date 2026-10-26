@@ -46,6 +46,7 @@ use crate::{
     editor_tab::{
         EditorTabChild, EditorTabChildSource, EditorTabData, EditorTabInfo,
     },
+    i18n,
     id::{
         DiffEditorId, EditorTabId, KeymapId, SettingsId, SplitId,
         ThemeColorSettingsId, VoltViewId,
@@ -2036,7 +2037,7 @@ impl MainSplitData {
                             let doc = doc.clone();
                             internal_command.send(InternalCommand::HideAlert);
                             save_as(
-                                FileDialogOptions::new().title("Save File"),
+                                FileDialogOptions::new().title(i18n::t("Save File")),
                                 move |file: Option<FileInfo>| {
                                     let main_split = main_split.clone();
                                     let child = child.clone();
@@ -2065,7 +2066,7 @@ impl MainSplitData {
                             );
                         });
                         Some(AlertButton {
-                            text: "Save".to_string(),
+                            text: i18n::t("Save").to_string(),
                             action: save_action,
                         })
                     }
@@ -2088,7 +2089,7 @@ impl MainSplitData {
                             });
                         });
                         Some(AlertButton {
-                            text: "Save".to_string(),
+                            text: i18n::t("Save").to_string(),
                             action: save_action,
                         })
                     }
@@ -2101,15 +2102,18 @@ impl MainSplitData {
                     self.common
                         .internal_command
                         .send(InternalCommand::ShowAlert {
-                            title: format!(
-                                "Do you want to save the changes you made to {name}?"
+                            title: i18n::tf(
+                                "Do you want to save the changes you made to {}?",
+                                &[&name],
                             ),
-                            msg: "Your changes will be lost if you don't save them."
-                                .to_string(),
+                            msg: i18n::t(
+                                "Your changes will be lost if you don't save them.",
+                            )
+                            .to_string(),
                             buttons: vec![
                                 save_button,
                                 AlertButton {
-                                    text: "Don't Save".to_string(),
+                                    text: i18n::t("Don't Save").to_string(),
                                     action: Rc::new(move || {
                                         internal_command
                                             .send(InternalCommand::HideAlert);
@@ -2599,7 +2603,7 @@ impl MainSplitData {
     pub fn save_scratch_doc(&self, doc: Rc<Doc>) {
         let main_split = self.clone();
         save_as(
-            FileDialogOptions::new().title("Save File"),
+            FileDialogOptions::new().title(i18n::t("Save File")),
             move |file: Option<FileInfo>| {
                 if let Some(mut file) = file {
                     main_split.save_as(
@@ -2620,7 +2624,7 @@ impl MainSplitData {
     pub fn save_scratch_doc2(&self, doc: Rc<Doc>) {
         let main_split = self.clone();
         save_as(
-            FileDialogOptions::new().title("Save File"),
+            FileDialogOptions::new().title(i18n::t("Save File")),
             move |file: Option<FileInfo>| {
                 if let Some(mut file) = file {
                     main_split.save_as2(
