@@ -173,7 +173,7 @@ pub struct AppData {
     pub app_terminated: RwSignal<bool>,
     /// The latest release information
     pub latest_release: RwSignal<Arc<Option<ReleaseInfo>>>,
-    pub watcher: Arc<notify::RecommendedWatcher>,
+    pub watcher: Arc<lapce_proxy::watcher::RecommendedWatcher>,
     pub tracing_handle: Handle<Targets>,
     pub config: RwSignal<Arc<LapceConfig>>,
     /// Paths to extra plugins to load
@@ -3890,9 +3890,14 @@ pub fn launch() {
     let plugin_paths = Arc::new(cli.plugin_path);
 
     let (tx, rx) = channel();
-    let mut watcher = notify::recommended_watcher(ConfigWatcher::new(tx))
-        .context("Failed to spawn file watcher")
-        .unwrap();
+    // WASI では notify の既定が 30 秒おきに見に行く PollWatcher なので、設定を変えても画面に出るまで待たされる。
+    // proxy と同じく BrowserOS の inotify を使う見張りにする（ほかの OS では notify の既定と同じ）
+    let mut watcher = <lapce_proxy::watcher::RecommendedWatcher as Watcher>::new(
+        ConfigWatcher::new(tx),
+        notify::Config::default(),
+    )
+    .context("Failed to spawn file watcher")
+    .unwrap();
     if let Some(path) = LapceConfig::settings_file() {
         if let Err(err) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
             tracing::error!("{:?}", err);

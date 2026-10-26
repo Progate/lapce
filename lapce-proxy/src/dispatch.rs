@@ -42,13 +42,15 @@ use parking_lot::Mutex;
 
 #[cfg(not(target_os = "wasi"))]
 use crate::git::{
-    file_get_head, git_checkout, git_commit, git_diff_new, git_discard_files_changes,
-    git_discard_workspace_changes, git_get_remote_file_url, git_init,
+    file_get_head, git_checkout, git_commit, git_diff_new,
+    git_discard_files_changes, git_discard_workspace_changes,
+    git_get_remote_file_url, git_init,
 };
 #[cfg(target_os = "wasi")]
 use crate::git_wasi::{
-    file_get_head, git_checkout, git_commit, git_diff_new, git_discard_files_changes,
-    git_discard_workspace_changes, git_get_remote_file_url, git_init,
+    file_get_head, git_checkout, git_commit, git_diff_new,
+    git_discard_files_changes, git_discard_workspace_changes,
+    git_get_remote_file_url, git_init,
 };
 #[cfg(not(target_os = "wasi"))]
 use crate::terminal::{Terminal, TerminalSender};
@@ -204,18 +206,27 @@ impl ProxyHandler for Dispatcher {
             NewTerminal { term_id, .. } if lapce_core::read_only::is_enabled() => {
                 self.core_rpc.terminal_launch_failed(
                     term_id,
-                    "the terminal is not available in a read-only workspace".to_string(),
+                    "the terminal is not available in a read-only workspace"
+                        .to_string(),
                 );
             }
             // BrowserOS の pty の上でシェルを動かす（→ terminal_wasi.rs）
             #[cfg(target_os = "wasi")]
             NewTerminal { term_id, profile } => {
-                match crate::terminal_wasi::start(term_id, profile, 50, 10, self.core_rpc.clone()) {
+                match crate::terminal_wasi::start(
+                    term_id,
+                    profile,
+                    50,
+                    10,
+                    self.core_rpc.clone(),
+                ) {
                     Ok((sender, pid)) => {
                         self.core_rpc.terminal_process_id(term_id, Some(pid));
                         self.terminals.insert(term_id, sender);
                     }
-                    Err(e) => self.core_rpc.terminal_launch_failed(term_id, e.to_string()),
+                    Err(e) => {
+                        self.core_rpc.terminal_launch_failed(term_id, e.to_string())
+                    }
                 }
             }
             #[cfg(target_os = "wasi")]
@@ -225,9 +236,16 @@ impl ProxyHandler for Dispatcher {
                 }
             }
             #[cfg(target_os = "wasi")]
-            TerminalResize { term_id, width, height } => {
+            TerminalResize {
+                term_id,
+                width,
+                height,
+            } => {
                 if let Some(tx) = self.terminals.get(&term_id) {
-                    tx.send(TerminalMessage::Resize { rows: height as u16, cols: width as u16 });
+                    tx.send(TerminalMessage::Resize {
+                        rows: height as u16,
+                        cols: width as u16,
+                    });
                 }
             }
             #[cfg(target_os = "wasi")]
@@ -489,7 +507,8 @@ impl ProxyHandler for Dispatcher {
                 let buffer = Buffer::new(buffer_id, path.clone());
                 let content = buffer.rope.to_string();
                 // 読み取り専用で開いたワークスペースの文書は、読めるファイルでも読み取り専用にする
-                let read_only = buffer.read_only || lapce_core::read_only::is_enabled();
+                let read_only =
+                    buffer.read_only || lapce_core::read_only::is_enabled();
                 self.catalog_rpc.did_open_document(
                     &path,
                     buffer.language_id.to_string(),
@@ -1559,7 +1578,10 @@ fn move_to_trash(path: &Path) -> Result<(), trash::Error> {
 fn move_to_trash(path: &Path) -> io::Result<()> {
     let data_home = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(|home| PathBuf::from(home).join(".local/share"))
+        })
         .ok_or_else(|| io::Error::other("neither XDG_DATA_HOME nor HOME is set"))?;
     let trash = data_home.join("Trash");
     let files = trash.join("files");
@@ -1574,7 +1596,9 @@ fn move_to_trash(path: &Path) -> io::Result<()> {
     // 同じ名前が既にあれば `name.2`, `name.3`, … とずらす（仕様どおり）
     let mut candidate = name.clone();
     let mut index = 2;
-    while files.join(&candidate).exists() || info.join(format!("{candidate}.trashinfo")).exists() {
+    while files.join(&candidate).exists()
+        || info.join(format!("{candidate}.trashinfo")).exists()
+    {
         candidate = format!("{name}.{index}");
         index += 1;
     }
