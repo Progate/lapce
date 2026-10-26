@@ -166,7 +166,6 @@ impl LapceConfig {
 
         lapce_config.ui_language =
             Language::from_setting(&lapce_config.core.language);
-        i18n::set_language(lapce_config.ui_language);
 
         lapce_config.available_color_themes =
             Self::load_color_themes(disabled_volts, extra_plugin_paths);

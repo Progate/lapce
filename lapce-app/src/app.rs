@@ -3675,28 +3675,16 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
 fn window(window_data: WindowData) -> impl View {
     let window_tabs = window_data.window_tabs.read_only();
     let active = window_data.active.read_only();
-    let config = window_data.config;
-    // ビューは作るときに文字を取るので、画面の言語（→ crate::i18n）が変わったら作り直す。
-    // 言語をキーに含めて作り直すのはビューだけで、映している中身（文書・エディター・パネル）はそのまま残る
-    let items = move || {
-        let language = config.with(|config| config.ui_language);
-        window_tabs
-            .get()
-            .into_iter()
-            .map(|(index, window_tab)| (index, window_tab, language))
-            .collect::<im::Vector<_>>()
+    let items = move || window_tabs.get();
+    let key = |(_, window_tab): &(RwSignal<usize>, Rc<WindowTabData>)| {
+        window_tab.window_tab_id
     };
-    let key = |(_, window_tab, language): &(
-        RwSignal<usize>,
-        Rc<WindowTabData>,
-        i18n::Language,
-    )| (window_tab.window_tab_id, *language);
     let active = move || active.get();
     let window_focus = create_rw_signal(false);
     let ime_enabled = window_data.ime_enabled;
     let window_maximized = window_data.common.window_maximized;
 
-    tab(active, items, key, |(_, window_tab_data, _)| {
+    tab(active, items, key, |(_, window_tab_data)| {
         window_tab(window_tab_data)
     })
     .window_title(move || {
@@ -3921,6 +3909,8 @@ pub fn launch() {
 
     let windows = scope.create_rw_signal(im::HashMap::new());
     let config = LapceConfig::load(&LapceWorkspace::default(), &[], &plugin_paths);
+    // 画面の言語は起動したときに 1 度だけ決める（→ crate::i18n の set_language）
+    i18n::set_language(config.ui_language);
 
     // Restore scale from config
     window_scale.set(config.ui.scale());

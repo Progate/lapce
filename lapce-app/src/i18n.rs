@@ -6,7 +6,7 @@
 //!
 //! 画面の言語は設定の `core.language` で決める。既定の `system` は、ほかの Linux のプログラムと同じく
 //! ロケールの環境変数（`LANGUAGE`・`LC_ALL`・`LC_MESSAGES`・`LANG`）に従う。起動する側が言語を決め、
-//! 利用者は設定で別の言語を選べる
+//! 利用者は設定で別の言語を選べる（次に起動したときから効く → set_language）
 
 use std::{
     collections::HashMap,
@@ -93,8 +93,11 @@ pub const SYSTEM_LANGUAGE: &str = "system";
 
 static CURRENT: AtomicU8 = AtomicU8::new(0);
 
-/// 画面の言語を決める。ビューは作るときに文字を取るので、このあとに作るビューから変わる。
-/// 設定の言語が変わったら窓がビューを作り直す（→ app.rs の `window`）
+/// 画面の言語を決める。起動したときに 1 度だけ呼ぶ（→ app.rs の `launch`）。
+///
+/// ビューは作るときに文字を取り、Lapce は窓のビューとデータを一緒に作って一緒に捨てる（ビューだけを作り直すと、
+/// ビューの中で作ったデータの signal が捨てられて落ちる）。動いている途中で言語を変えると、新しく開いたメニューだけが
+/// 新しい言語になって混ざるので、VS Code の表示言語と同じく、設定で選び直した言語は次に起動したときから効く
 pub fn set_language(language: Language) {
     CURRENT.store(language as u8, Ordering::Relaxed);
 }

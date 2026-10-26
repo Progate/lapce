@@ -7,7 +7,7 @@ pub struct CoreConfig {
     #[field_names(desc = "Enable modal editing (Vim like)")]
     pub modal: bool,
     #[field_names(
-        desc = "The language of Lapce's menus and panels. \"system\" follows the language of the system (the LANG environment variable)"
+        desc = "The language of Lapce's menus and panels. \"system\" follows the language of the system (the LANG environment variable). Takes effect the next time Lapce starts"
     )]
     pub language: String,
     #[field_names(desc = "Set the color theme of Lapce")]

@@ -22,7 +22,7 @@
 "Modal" = "モーダル編集"
 "Enable modal editing (Vim like)" = "モーダル編集（Vim 風）を有効にします"
 "Language" = "表示言語"
-"The language of Lapce's menus and panels. \"system\" follows the language of the system (the LANG environment variable)" = "Lapce のメニューやパネルの言語です。「システムに合わせる」ではシステムの言語（環境変数 LANG）に従います"
+"The language of Lapce's menus and panels. \"system\" follows the language of the system (the LANG environment variable). Takes effect the next time Lapce starts" = "Lapce のメニューやパネルの言語です。「システムに合わせる」ではシステムの言語（環境変数 LANG）に従います。次に Lapce を起動したときから切り替わります"
 "Color Theme" = "配色テーマ"
 "Set the color theme of Lapce" = "Lapce の配色テーマを設定します"
 "Icon Theme" = "アイコンのテーマ"
