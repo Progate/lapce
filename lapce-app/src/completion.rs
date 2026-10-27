@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    cell::RefCell,
     collections::{HashMap, HashSet},
     path::PathBuf,
     rc::Rc,
@@ -73,6 +74,9 @@ pub struct CompletionData {
     config: ReadSignal<Arc<LapceConfig>>,
     /// The open documents, for word based suggestions (set once the main split exists)
     docs: Option<RwSignal<im::HashMap<PathBuf, Rc<Doc>>>>,
+    /// The words of each open document with the revision they were counted at, so that a keystroke
+    /// only counts the documents that changed since the last request
+    word_cache: Rc<RefCell<HashMap<PathBuf, (u64, Rc<HashMap<String, usize>>)>>>,
 }
 
 /// The provider id of word based suggestions. They come from the open documents, not from a plugin,
@@ -101,6 +105,7 @@ impl CompletionData {
             latest_editor_id: None,
             config,
             docs: None,
+            word_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -179,7 +184,8 @@ impl CompletionData {
     /// in the same language as `path`, like VS Code's `editor.wordBasedSuggestions`. They complete
     /// names even when no language server runs for the language.
     ///
-    /// The word being typed is left out, unless it also appears somewhere else.
+    /// The word being typed is left out, unless it also appears somewhere else. Only the words that
+    /// can match what is typed are kept, and the most frequent come first when there are too many.
     fn word_items(&self, path: &PathBuf) -> im::Vector<ScoredCompletionItem> {
         let config = self.config.get_untracked();
         let Some(docs) = self.docs.filter(|_| config.editor.word_based_suggestions)
@@ -190,24 +196,48 @@ impl CompletionData {
         let language = docs
             .get(path)
             .map(|doc| doc.syntax.with_untracked(|syntax| syntax.language));
+        let mut cache = self.word_cache.borrow_mut();
+        cache.retain(|path, _| docs.contains_key(path));
         let mut counts: HashMap<String, usize> = HashMap::new();
-        for doc in docs.values() {
+        for (doc_path, doc) in docs.iter() {
             if doc.syntax.with_untracked(|syntax| Some(syntax.language)) != language
             {
                 continue;
             }
-            let text = doc.buffer.with_untracked(|buffer| buffer.to_string());
-            for word in words_of(&text) {
-                *counts.entry(word.to_string()).or_default() += 1;
+            let rev = doc.buffer.with_untracked(|buffer| buffer.rev());
+            let words = match cache.get(doc_path) {
+                Some((counted_rev, words)) if *counted_rev == rev => words.clone(),
+                _ => {
+                    let text =
+                        doc.buffer.with_untracked(|buffer| buffer.to_string());
+                    let mut words: HashMap<String, usize> = HashMap::new();
+                    for word in words_of(&text) {
+                        *words.entry(word.to_string()).or_default() += 1;
+                    }
+                    let words = Rc::new(words);
+                    cache.insert(doc_path.clone(), (rev, words.clone()));
+                    words
+                }
+            };
+            for (word, count) in words.iter() {
+                *counts.entry(word.clone()).or_default() += count;
             }
         }
         if let Some(count) = counts.get_mut(&self.input) {
             *count -= 1;
         }
-        counts
+        let mut words: Vec<(String, usize)> = counts
             .into_iter()
-            .filter(|(_, count)| *count > 0)
-            .take(MAX_WORD_COMPLETION_ITEMS)
+            .filter(|(word, count)| *count > 0 && may_match(word, &self.input))
+            .collect();
+        if words.len() > MAX_WORD_COMPLETION_ITEMS {
+            words.sort_by(|(a, a_count), (b, b_count)| {
+                b_count.cmp(a_count).then_with(|| a.cmp(b))
+            });
+            words.truncate(MAX_WORD_COMPLETION_ITEMS);
+        }
+        words
+            .into_iter()
             .map(|(word, _)| ScoredCompletionItem {
                 item: CompletionItem {
                     label: word,
@@ -514,9 +544,27 @@ fn words_of(text: &str) -> impl Iterator<Item = &str> {
         })
 }
 
+/// Whether `word` contains the characters of `input` in order, ignoring case. The fuzzy filter
+/// (`filter_items`) drops every other word anyway, so they are not worth keeping under the cap.
+fn may_match(word: &str, input: &str) -> bool {
+    let mut word = word.chars().flat_map(char::to_lowercase);
+    input
+        .chars()
+        .flat_map(char::to_lowercase)
+        .all(|wanted| word.any(|c| c == wanted))
+}
+
 #[cfg(test)]
 mod word_tests {
-    use super::words_of;
+    use super::{may_match, words_of};
+
+    #[test]
+    fn may_match_keeps_words_containing_the_input_in_order() {
+        assert!(may_match("ContentView", "cview"));
+        assert!(may_match("ContentView", ""));
+        assert!(!may_match("ContentView", "vc"));
+        assert!(!may_match("body", "bodyx"));
+    }
 
     #[test]
     fn words_of_splits_on_symbols_and_skips_numbers_and_single_letters() {
