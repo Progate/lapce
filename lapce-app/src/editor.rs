@@ -2329,6 +2329,22 @@ impl EditorData {
         self.doc().save(after_action);
     }
 
+    /// Saves the document when focus leaves the editor (`editor.autosave-on-focus-change`).
+    /// A scratch document has no file to save to, so saving it would ask for one;
+    /// it is left alone like the interval autosave does (→ `Doc::check_auto_save`).
+    pub fn save_on_focus_change(&self) {
+        let config = self.common.config.get_untracked();
+        if !config.editor.autosave_on_focus_change {
+            return;
+        }
+        let doc = self.doc();
+        let is_file = matches!(doc.content.get_untracked(), DocContent::File { .. });
+        if !is_file || doc.is_pristine() {
+            return;
+        }
+        self.save(config.editor.format_on_autosave, || {});
+    }
+
     pub fn save(
         &self,
         allow_formatting: bool,

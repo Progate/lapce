@@ -223,6 +223,10 @@ pub struct EditorConfig {
     )]
     pub format_on_autosave: bool,
     #[field_names(
+        desc = "Save the document when the editor loses focus (another editor, a panel or another window)"
+    )]
+    pub autosave_on_focus_change: bool,
+    #[field_names(
         desc = "If enabled the cursor treats leading soft tabs as if they are hard tabs."
     )]
     pub atomic_soft_tabs: bool,
