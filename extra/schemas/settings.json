@@ -249,6 +249,9 @@
                 "autosave-on-focus-change": {
                     "type": "boolean"
                 },
+                "word-based-suggestions": {
+                    "type": "boolean"
+                },
                 "enable-inlay-hints": {
                     "type": "boolean"
                 },

@@ -52,6 +52,7 @@ error-lens-font-size = 0
 error-lens-multiline = false
 enable-completion-lens = false
 enable-inline-completion = true
+word-based-suggestions = true
 completion-lens-font-family = ""
 completion-lens-font-size = 0
 blink-interval = 500                                         # ms

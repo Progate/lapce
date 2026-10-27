@@ -1,4 +1,11 @@
-use std::{borrow::Cow, path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    rc::Rc,
+    str::FromStr,
+    sync::Arc,
+};
 
 use floem::{
     peniko::kurbo::Rect,
@@ -10,12 +17,12 @@ use lapce_core::{
 };
 use lapce_rpc::{plugin::PluginId, proxy::ProxyRpcHandler};
 use lsp_types::{
-    CompletionItem, CompletionResponse, CompletionTextEdit, InsertTextFormat,
-    Position,
+    CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit,
+    InsertTextFormat, Position,
 };
 use nucleo::Utf32Str;
 
-use crate::{config::LapceConfig, editor::EditorData, snippet::Snippet};
+use crate::{config::LapceConfig, doc::Doc, editor::EditorData, snippet::Snippet};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum CompletionStatus {
@@ -64,7 +71,16 @@ pub struct CompletionData {
     /// Matcher for filtering the completion items
     matcher: RwSignal<nucleo::Matcher>,
     config: ReadSignal<Arc<LapceConfig>>,
+    /// The open documents, for word based suggestions (set once the main split exists)
+    docs: Option<RwSignal<im::HashMap<PathBuf, Rc<Doc>>>>,
 }
+
+/// The provider id of word based suggestions. They come from the open documents, not from a plugin,
+/// so they take an id no plugin gets (plugin ids count up from 0).
+pub const WORD_COMPLETION_PLUGIN_ID: PluginId = PluginId(u64::MAX);
+
+/// The most words to suggest, so that a huge document does not make every keystroke slow
+const MAX_WORD_COMPLETION_ITEMS: usize = 5000;
 
 impl CompletionData {
     pub fn new(cx: Scope, config: ReadSignal<Arc<LapceConfig>>) -> Self {
@@ -84,7 +100,13 @@ impl CompletionData {
                 .create_rw_signal(nucleo::Matcher::new(nucleo::Config::DEFAULT)),
             latest_editor_id: None,
             config,
+            docs: None,
         }
+    }
+
+    /// Lets word based suggestions read the open documents
+    pub fn set_docs(&mut self, docs: RwSignal<im::HashMap<PathBuf, Rc<Doc>>>) {
+        self.docs = Some(docs);
     }
 
     /// Handle the response to a completion request.
@@ -116,7 +138,24 @@ impl CompletionData {
                 indices: Vec::new(),
             })
             .collect();
-        self.input_items.insert(input.to_string(), items);
+        // Several providers answer the same request (every plugin, and the words of the open
+        // documents), so add to what has arrived instead of replacing it. A word that a plugin
+        // also suggests is dropped, since the plugin's item knows more about it.
+        let labels: HashSet<&str> =
+            items.iter().map(|i| i.item.label.as_str()).collect();
+        let mut merged: im::Vector<ScoredCompletionItem> = self
+            .input_items
+            .get(input)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|i| {
+                i.plugin_id != WORD_COMPLETION_PLUGIN_ID
+                    || !labels.contains(i.item.label.as_str())
+            })
+            .collect();
+        merged.append(items);
+        self.input_items.insert(input.to_string(), merged);
         self.filter_items();
     }
 
@@ -130,8 +169,57 @@ impl CompletionData {
         position: Position,
     ) {
         self.latest_editor_id = Some(editor_id);
-        self.input_items.insert(input.clone(), im::Vector::new());
+        let words = self.word_items(&path);
+        self.input_items.insert(input.clone(), words);
+        self.filter_items();
         proxy_rpc.completion(self.request_id, path, input, position);
+    }
+
+    /// Word based suggestions (`editor.word-based-suggestions`): the words of the open documents
+    /// in the same language as `path`, like VS Code's `editor.wordBasedSuggestions`. They complete
+    /// names even when no language server runs for the language.
+    ///
+    /// The word being typed is left out, unless it also appears somewhere else.
+    fn word_items(&self, path: &PathBuf) -> im::Vector<ScoredCompletionItem> {
+        let config = self.config.get_untracked();
+        let Some(docs) = self.docs.filter(|_| config.editor.word_based_suggestions)
+        else {
+            return im::Vector::new();
+        };
+        let docs = docs.get_untracked();
+        let language = docs
+            .get(path)
+            .map(|doc| doc.syntax.with_untracked(|syntax| syntax.language));
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for doc in docs.values() {
+            if doc.syntax.with_untracked(|syntax| Some(syntax.language)) != language
+            {
+                continue;
+            }
+            let text = doc.buffer.with_untracked(|buffer| buffer.to_string());
+            for word in words_of(&text) {
+                *counts.entry(word.to_string()).or_default() += 1;
+            }
+        }
+        if let Some(count) = counts.get_mut(&self.input) {
+            *count -= 1;
+        }
+        counts
+            .into_iter()
+            .filter(|(_, count)| *count > 0)
+            .take(MAX_WORD_COMPLETION_ITEMS)
+            .map(|(word, _)| ScoredCompletionItem {
+                item: CompletionItem {
+                    label: word,
+                    kind: Some(CompletionItemKind::TEXT),
+                    ..Default::default()
+                },
+                plugin_id: WORD_COMPLETION_PLUGIN_ID,
+                score: 0,
+                label_score: 0,
+                indices: Vec::new(),
+            })
+            .collect()
     }
 
     /// Close the completion, clearing all the data.
@@ -413,5 +501,45 @@ fn completion_lens_text(
         Some(None)
     } else {
         Some(Some(item.to_string()))
+    }
+}
+
+/// The words of `text`: runs of letters, digits and `_` that do not start with a digit,
+/// at least 2 characters long (a single letter is faster to type than to pick)
+fn words_of(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|word| {
+            word.chars().count() >= 2
+                && !word.starts_with(|c: char| c.is_ascii_digit())
+        })
+}
+
+#[cfg(test)]
+mod word_tests {
+    use super::words_of;
+
+    #[test]
+    fn words_of_splits_on_symbols_and_skips_numbers_and_single_letters() {
+        let words: Vec<&str> =
+            words_of("struct ContentView: View { let x = 42; var body_1: some }")
+                .collect();
+        assert_eq!(
+            words,
+            vec![
+                "struct",
+                "ContentView",
+                "View",
+                "let",
+                "var",
+                "body_1",
+                "some"
+            ]
+        );
+    }
+
+    #[test]
+    fn words_of_keeps_non_ascii_identifiers() {
+        let words: Vec<&str> = words_of("let 名前 = \"にんじゃ\"").collect();
+        assert_eq!(words, vec!["let", "名前", "にんじゃ"]);
     }
 }
