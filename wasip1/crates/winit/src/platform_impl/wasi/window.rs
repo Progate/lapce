@@ -40,6 +40,13 @@ impl std::fmt::Debug for Window {
     }
 }
 
+/// 走っている実行ファイルの名前（`/usr/bin/lapce` なら `lapce`）。X11 の winit が `WM_CLASS` の既定に使うものと同じ
+fn program_name() -> Option<String> {
+    let path = std::env::args_os().next()?;
+    let name = std::path::Path::new(&path).file_stem()?.to_string_lossy().into_owned();
+    (!name.is_empty()).then_some(name)
+}
+
 impl Window {
     pub(crate) fn new(
         el: &ActiveEventLoop,
@@ -58,6 +65,12 @@ impl Window {
             Connection::open(width, height).map_err(|error| os_error!(format!("{error}")))?;
         if !attrs.title.is_empty() {
             connection.send(&format!("title {} {}", connection.id, encode_text(&attrs.title)));
+        }
+        // どのアプリの窓か（X の `WM_CLASS`）。X11 の winit と同じく、実行ファイルの名前を名乗る。
+        // 名乗らないと、desktop-tile やドックが窓をアプリの場所（`StartupWMClass`）へはめられず、
+        // 窓は開いた大きさのまま画面に浮く
+        if let Some(name) = program_name() {
+            connection.send(&format!("app {} {}", connection.id, encode_text(&name)));
         }
         let shared = Arc::new(Shared {
             connection,
