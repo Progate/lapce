@@ -1,9 +1,11 @@
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::{
+    cell::RefCell,
+    collections::HashSet,
     io::{BufReader, IsTerminal, Read, Write},
     ops::Range,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Stdio,
     rc::Rc,
     sync::{
@@ -58,7 +60,7 @@ use lapce_core::{
 };
 use lapce_rpc::{
     RpcMessage,
-    core::{CoreMessage, CoreNotification},
+    core::{CoreMessage, CoreNotification, CoreRequest, CoreResponse},
     file::PathObject,
 };
 use lsp_types::{CompletionItemKind, MessageType, ShowMessageParams};
@@ -86,6 +88,7 @@ use crate::{
     },
     editor_tab::{EditorTabChild, EditorTabData},
     focus_text::focus_text,
+    i18n,
     id::{EditorTabId, SplitId},
     keymap::keymap_view,
     keypress::keymap::KeyMap,
@@ -141,6 +144,37 @@ struct Cli {
     #[clap(value_parser = lapce_proxy::cli::parse_file_line_column)]
     #[clap(value_hint = clap::ValueHint::AnyPath)]
     paths: Vec<PathObject>,
+
+    /// Open the workspace read-only: no editing, saving, terminal or source control
+    /// (BrowserOS only. → lapce_core::read_only)
+    #[cfg(target_os = "wasi")]
+    #[clap(long, action)]
+    read_only: bool,
+
+    /// Listen for requests from other `lapce` commands (such as `--save-all`) at this socket
+    /// path instead of the shared one. Always starts a new instance, so that each instance
+    /// can be addressed on its own (like `nvim --listen`)
+    #[clap(long, value_name = "PATH")]
+    listen: Option<PathBuf>,
+
+    /// The running Lapce to send `--save-all` to: the socket path it listens at (`--listen`).
+    /// Without it, the instance listening at the shared socket
+    #[clap(long, value_name = "PATH")]
+    server: Option<PathBuf>,
+
+    /// Ask the running Lapce to write every modified document to its file, wait until the
+    /// writes are done, and exit. Exits with 1 when a file could not be written, and with 2
+    /// when no Lapce answers
+    #[clap(long, action)]
+    save_all: bool,
+}
+
+/// What a request on the local socket asks the app to do (→ `serve_local_socket_client`)
+#[derive(Clone)]
+enum RemoteCommand {
+    OpenPaths(Vec<PathObject>),
+    /// Save every modified document, then send the files that could not be written
+    SaveAll(SyncSender<Vec<PathBuf>>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,7 +200,7 @@ pub struct AppData {
     pub app_terminated: RwSignal<bool>,
     /// The latest release information
     pub latest_release: RwSignal<Arc<Option<ReleaseInfo>>>,
-    pub watcher: Arc<notify::RecommendedWatcher>,
+    pub watcher: Arc<lapce_proxy::watcher::RecommendedWatcher>,
     pub tracing_handle: Handle<Targets>,
     pub config: RwSignal<Arc<LapceConfig>>,
     /// Paths to extra plugins to load
@@ -192,6 +226,54 @@ impl AppData {
             return window.active_window_tab();
         }
         None
+    }
+
+    /// Writes every modified document of every window to its file (→ `CoreRequest::SaveAll`),
+    /// and calls `on_done` with the files that could not be written once all the writes are
+    /// done. Nothing is formatted: the request comes from outside, which only wants the files
+    /// to hold what the documents show.
+    pub fn save_all_documents(&self, on_done: impl FnOnce(Vec<PathBuf>) + 'static) {
+        let mut paths = HashSet::new();
+        let mut docs = Vec::new();
+        for (_, window) in self.windows.get_untracked() {
+            for (_, window_tab) in window.window_tabs.get_untracked() {
+                for (path, doc) in window_tab.main_split.docs.get_untracked() {
+                    if !doc.is_pristine() && paths.insert(path.clone()) {
+                        docs.push((path, doc));
+                    }
+                }
+            }
+        }
+        if docs.is_empty() {
+            on_done(Vec::new());
+            return;
+        }
+        // The writes answer one by one, so count down and answer once with all the failures
+        let pending = Rc::new(RefCell::new((docs.len(), Vec::new(), Some(on_done))));
+        for (path, doc) in docs {
+            let pending = pending.clone();
+            doc.save_reporting(move |saved| {
+                let done = {
+                    let mut pending = pending.borrow_mut();
+                    pending.0 -= 1;
+                    if let Err(err) = saved {
+                        tracing::error!("failed to save {path:?}: {err}");
+                        pending.1.push(path);
+                    }
+                    if pending.0 == 0 {
+                        pending
+                            .2
+                            .take()
+                            .map(|on_done| (on_done, std::mem::take(&mut pending.1)))
+                    } else {
+                        None
+                    }
+                };
+                if let Some((on_done, failed)) = done {
+                    on_done(failed);
+                }
+            });
+        }
     }
 
     fn active_window(&self) -> Option<WindowData> {
@@ -799,7 +881,7 @@ fn editor_tab_header(
                 },
                 || false,
                 || false,
-                || "Close",
+                || i18n::t("Close"),
                 config,
             )
             .on_event_stop(EventListener::PointerDown, |_| {})
@@ -1075,7 +1157,7 @@ fn editor_tab_header(
                         },
                         || false,
                         || false,
-                        || "Previous Tab",
+                        || i18n::t("Previous Tab"),
                         config,
                     )
                     .style(|s| s.margin_horiz(6.0).margin_vert(7.0)),
@@ -1087,7 +1169,7 @@ fn editor_tab_header(
                         },
                         || false,
                         || false,
-                        || "Next Tab",
+                        || i18n::t("Next Tab"),
                         config,
                     )
                     .style(|s| s.margin_right(6.0)),
@@ -1176,7 +1258,7 @@ fn editor_tab_header(
                         },
                         || false,
                         || false,
-                        || "Split Horizontally",
+                        || i18n::t("Split Horizontally"),
                         config,
                     )
                     .style(|s| s.margin_left(6.0)),
@@ -1191,7 +1273,7 @@ fn editor_tab_header(
                         },
                         || false,
                         || false,
-                        || "Close All",
+                        || i18n::t("Close All"),
                         config,
                     )
                     .style(|s| s.margin_horiz(6.0)),
@@ -2739,7 +2821,7 @@ fn palette_content(
                 .min_height(0.0)
                 .set(PropagatePointerWheel, false)
         }),
-        text("No matching results").style(move |s| {
+        text(i18n::t("No matching results")).style(move |s| {
             s.display(if items.with(|items| items.is_empty()) {
                 Display::Flex
             } else {
@@ -2895,7 +2977,7 @@ fn window_message_view(
                     },
                     || false,
                     || false,
-                    || "Close",
+                    || i18n::t("Close"),
                     config,
                 )
                 .style(|s| s.margin_left(6.0)),
@@ -3428,7 +3510,7 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
                     stack((
                         text(
                             workspace_title(&tab.workspace)
-                                .unwrap_or_else(|| String::from("New Tab")),
+                                .unwrap_or_else(|| String::from(i18n::t("New Tab"))),
                         )
                         .style(|s| {
                             s.margin_left(10.0)
@@ -3451,7 +3533,7 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
                                 },
                                 || false,
                                 || false,
-                                || "Close",
+                                || i18n::t("Close"),
                                 config.read_only(),
                             )
                             .style(|s| s.margin_horiz(6.0))
@@ -3609,7 +3691,7 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
             },
             || false,
             || false,
-            || "New Workspace Tab",
+            || i18n::t("New Workspace Tab"),
             config.read_only(),
         ))
         .on_resize(move |rect| {
@@ -3676,6 +3758,8 @@ fn window(window_data: WindowData) -> impl View {
     let window_focus = create_rw_signal(false);
     let ime_enabled = window_data.ime_enabled;
     let window_maximized = window_data.common.window_maximized;
+    let focus_window_tabs = window_data.window_tabs;
+    let focus_active = window_data.active;
 
     tab(active, items, key, |(_, window_tab_data)| {
         window_tab(window_tab_data)
@@ -3700,6 +3784,14 @@ fn window(window_data: WindowData) -> impl View {
     })
     .on_event_cont(EventListener::WindowGotFocus, move |_| {
         window_focus.set(true);
+    })
+    .on_event_cont(EventListener::WindowLostFocus, move |_| {
+        let active = focus_active.get_untracked();
+        let window_tab = focus_window_tabs
+            .with_untracked(|tabs| tabs.get(active).map(|(_, tab)| tab.clone()));
+        if let Some(window_tab) = window_tab {
+            window_tab.main_split.editors.save_on_focus_change();
+        }
     })
     .on_event_cont(EventListener::WindowMaximizeChanged, move |event| {
         if let Event::WindowMaximizeChanged(maximized) = event {
@@ -3735,6 +3827,16 @@ pub fn launch() {
     }
 
     let cli = Cli::parse();
+    // 板の並びや文書を作るより先に決める（どれも作るときに読む）
+    #[cfg(target_os = "wasi")]
+    if cli.read_only {
+        lapce_core::read_only::enable();
+    }
+
+    if cli.save_all {
+        std::process::exit(remote_save_all(cli.server.as_deref()));
+    }
+    let listen_path = cli.listen.clone().or_else(Directory::local_socket);
 
     if !cli.wait {
         logging::panic_hook();
@@ -3826,7 +3928,7 @@ pub fn launch() {
 
     // If the cli is not requesting a new window, and we're not developing a plugin, we try to open
     // in the existing Lapce process
-    if !cli.new {
+    if !cli.new && cli.listen.is_none() {
         match get_socket() {
             Ok(socket) => {
                 if let Err(e) = try_open_in_existing_process(socket, &cli.paths) {
@@ -3866,9 +3968,14 @@ pub fn launch() {
     let plugin_paths = Arc::new(cli.plugin_path);
 
     let (tx, rx) = channel();
-    let mut watcher = notify::recommended_watcher(ConfigWatcher::new(tx))
-        .context("Failed to spawn file watcher")
-        .unwrap();
+    // WASI では notify の既定が 30 秒おきに見に行く PollWatcher なので、設定を変えても画面に出るまで待たされる。
+    // proxy と同じく BrowserOS の inotify を使う見張りにする（ほかの OS では notify の既定と同じ）
+    let mut watcher = <lapce_proxy::watcher::RecommendedWatcher as Watcher>::new(
+        ConfigWatcher::new(tx),
+        notify::Config::default(),
+    )
+    .context("Failed to spawn file watcher")
+    .unwrap();
     if let Some(path) = LapceConfig::settings_file() {
         if let Err(err) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
             tracing::error!("{:?}", err);
@@ -3892,6 +3999,8 @@ pub fn launch() {
 
     let windows = scope.create_rw_signal(im::HashMap::new());
     let config = LapceConfig::load(&LapceWorkspace::default(), &[], &plugin_paths);
+    // 画面の言語は起動したときに 1 度だけ決める（→ crate::i18n の set_language）
+    i18n::set_language(config.ui_language);
 
     // Restore scale from config
     window_scale.set(config.ui.scale());
@@ -4027,23 +4136,31 @@ pub fn launch() {
             .unwrap();
     }
 
-    {
+    if let Some(listen_path) = listen_path {
         let (tx, rx) = sync_channel(1);
         let notification = create_signal_from_channel(rx);
         let app_data = app_data.clone();
-        create_effect(move |_| {
-            if let Some(CoreNotification::OpenPaths { paths }) = notification.get() {
+        create_effect(move |_| match notification.get() {
+            Some(RemoteCommand::OpenPaths(paths)) => {
                 if let Some(window_tab) = app_data.active_window_tab() {
                     window_tab.open_paths(&paths);
                     // focus window after open doc
                     floem::action::focus_window();
                 }
             }
+            Some(RemoteCommand::SaveAll(reply)) => {
+                app_data.save_all_documents(move |failed| {
+                    if let Err(err) = reply.send(failed) {
+                        tracing::error!("{:?}", err);
+                    }
+                });
+            }
+            None => {}
         });
         std::thread::Builder::new()
             .name("ListenLocalSocket".to_owned())
             .spawn(move || {
-                if let Err(err) = listen_local_socket(tx) {
+                if let Err(err) = listen_local_socket(&listen_path, tx) {
                     tracing::error!("{:?}", err);
                 }
             })
@@ -4136,38 +4253,34 @@ pub fn load_shell_env() {
         })
 }
 
-/// WASI（preview1）に Unix ドメインソケットは無い。既に開いている Lapce へは繋がず、
-/// 毎回自分で窓を開く
+/// A connection to a running Lapce's local socket
+#[cfg(not(target_os = "wasi"))]
+type LocalSocketStream = interprocess::local_socket::LocalSocketStream;
+/// A connection to a running Lapce's local socket. WASI's std has no Unix domain sockets, but
+/// BrowserOS takes Linux's socket calls (→ lapce_proxy::local_socket_wasi)
 #[cfg(target_os = "wasi")]
-pub fn get_socket() -> Result<std::convert::Infallible> {
-    Err(anyhow!("local sockets are not available on WASI"))
-}
-
-#[cfg(target_os = "wasi")]
-pub fn try_open_in_existing_process(
-    socket: std::convert::Infallible,
-    _paths: &[PathObject],
-) -> Result<()> {
-    match socket {}
-}
-
-#[cfg(target_os = "wasi")]
-fn listen_local_socket(_tx: SyncSender<CoreNotification>) -> Result<()> {
-    Err(anyhow!("local sockets are not available on WASI"))
-}
+type LocalSocketStream = std::fs::File;
 
 #[cfg(not(target_os = "wasi"))]
-pub fn get_socket() -> Result<interprocess::local_socket::LocalSocketStream> {
+fn connect_local_socket(path: &Path) -> Result<LocalSocketStream> {
+    Ok(interprocess::local_socket::LocalSocketStream::connect(
+        path,
+    )?)
+}
+
+#[cfg(target_os = "wasi")]
+fn connect_local_socket(path: &Path) -> Result<LocalSocketStream> {
+    Ok(lapce_proxy::local_socket_wasi::connect(path)?)
+}
+
+pub fn get_socket() -> Result<LocalSocketStream> {
     let local_socket = Directory::local_socket()
         .ok_or_else(|| anyhow!("can't get local socket folder"))?;
-    let socket =
-        interprocess::local_socket::LocalSocketStream::connect(local_socket)?;
-    Ok(socket)
+    connect_local_socket(&local_socket)
 }
 
-#[cfg(not(target_os = "wasi"))]
 pub fn try_open_in_existing_process(
-    mut socket: interprocess::local_socket::LocalSocketStream,
+    mut socket: LocalSocketStream,
     paths: &[PathObject],
 ) -> Result<()> {
     let msg: CoreMessage = RpcMessage::Notification(CoreNotification::OpenPaths {
@@ -4194,28 +4307,117 @@ pub fn try_open_in_existing_process(
     Ok(())
 }
 
-#[cfg(not(target_os = "wasi"))]
-fn listen_local_socket(tx: SyncSender<CoreNotification>) -> Result<()> {
-    let local_socket = Directory::local_socket()
-        .ok_or_else(|| anyhow!("can't get local socket folder"))?;
+/// `lapce --save-all`: asks the Lapce listening at `server` (the shared socket when `None`) to
+/// save every modified document, and waits for the answer, which comes once the files are
+/// written. Returns the exit status.
+fn remote_save_all(server: Option<&Path>) -> i32 {
+    let Some(path) = server
+        .map(Path::to_path_buf)
+        .or_else(Directory::local_socket)
+    else {
+        eprintln!("lapce: can't get the local socket folder");
+        return 2;
+    };
+    let mut socket = match connect_local_socket(&path) {
+        Ok(socket) => socket,
+        Err(err) => {
+            eprintln!("lapce: no Lapce is listening at {}: {err}", path.display());
+            return 2;
+        }
+    };
+    let request: CoreMessage = RpcMessage::Request(0, CoreRequest::SaveAll {});
+    if let Err(err) = lapce_rpc::stdio::write_msg(&mut socket, request) {
+        eprintln!("lapce: failed to ask {} to save: {err}", path.display());
+        return 2;
+    }
+    let answer: Option<CoreMessage> =
+        lapce_rpc::stdio::read_msg(&mut BufReader::new(socket)).unwrap_or(None);
+    match answer {
+        Some(RpcMessage::Response(_, CoreResponse::SaveAll { failed })) => {
+            if failed.is_empty() {
+                return 0;
+            }
+            for path in failed {
+                eprintln!("lapce: failed to save {}", path.display());
+            }
+            1
+        }
+        _ => {
+            eprintln!("lapce: {} did not answer", path.display());
+            2
+        }
+    }
+}
+
+/// Makes `local_socket` ready to bind: its folder exists (a `--listen` path may point into one
+/// that does not yet), and the socket a previous instance left behind is gone (binding to it fails)
+fn prepare_local_socket(local_socket: &Path) -> Result<()> {
+    if let Some(parent) = local_socket.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     if local_socket.exists() {
-        if let Err(err) = std::fs::remove_file(&local_socket) {
+        if let Err(err) = std::fs::remove_file(local_socket) {
             tracing::error!("{:?}", err);
         }
     }
+    Ok(())
+}
+
+#[cfg(not(target_os = "wasi"))]
+fn listen_local_socket(
+    local_socket: &Path,
+    tx: SyncSender<RemoteCommand>,
+) -> Result<()> {
+    prepare_local_socket(local_socket)?;
     let socket =
         interprocess::local_socket::LocalSocketListener::bind(local_socket)?;
 
     for stream in socket.incoming().flatten() {
         let tx = tx.clone();
-        std::thread::spawn(move || -> Result<()> {
-            let mut reader = BufReader::new(stream);
-            loop {
-                let msg: Option<CoreMessage> =
-                    lapce_rpc::stdio::read_msg(&mut reader)?;
+        std::thread::spawn(move || serve_local_socket_client(stream, tx));
+    }
+    Ok(())
+}
 
-                if let Some(RpcMessage::Notification(msg)) = msg {
-                    tx.send(msg)?;
+#[cfg(target_os = "wasi")]
+fn listen_local_socket(
+    local_socket: &Path,
+    tx: SyncSender<RemoteCommand>,
+) -> Result<()> {
+    prepare_local_socket(local_socket)?;
+    let socket =
+        lapce_proxy::local_socket_wasi::LocalSocketListener::bind(local_socket)?;
+
+    for stream in socket.incoming().flatten() {
+        let tx = tx.clone();
+        std::thread::spawn(move || serve_local_socket_client(stream, tx));
+    }
+    Ok(())
+}
+
+/// Answers the requests of one client of the local socket until it hangs up
+fn serve_local_socket_client(
+    stream: LocalSocketStream,
+    tx: SyncSender<RemoteCommand>,
+) -> Result<()> {
+    let mut reader = BufReader::new(stream);
+    loop {
+        let msg: Option<CoreMessage> = lapce_rpc::stdio::read_msg(&mut reader)?;
+        match msg {
+            Some(RpcMessage::Request(id, CoreRequest::SaveAll {})) => {
+                let (reply, failed) = sync_channel(1);
+                tx.send(RemoteCommand::SaveAll(reply))?;
+                let failed = failed.recv()?;
+                let response: CoreMessage =
+                    RpcMessage::Response(id, CoreResponse::SaveAll { failed });
+                lapce_rpc::stdio::write_msg(reader.get_mut(), response)?;
+            }
+            msg => {
+                if let Some(RpcMessage::Notification(
+                    CoreNotification::OpenPaths { paths },
+                )) = msg
+                {
+                    tx.send(RemoteCommand::OpenPaths(paths))?;
                 } else {
                     trace!(TraceLevel::ERROR, "Unhandled message: {msg:?}");
                 }
@@ -4228,9 +4430,8 @@ fn listen_local_socket(tx: SyncSender<CoreNotification>) -> Result<()> {
                     tracing::error!("{:?}", err);
                 }
             }
-        });
+        }
     }
-    Ok(())
 }
 
 pub fn window_menu(
@@ -4240,103 +4441,106 @@ pub fn window_menu(
     Menu::new("Lapce")
         .entry({
             let mut menu = Menu::new("Lapce")
-                .entry(MenuItem::new("About Lapce").action(move || {
+                .entry(MenuItem::new(i18n::t("About Lapce")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::ShowAbout)
                 }))
                 .separator()
                 .entry(
-                    Menu::new("Settings...")
-                        .entry(MenuItem::new("Open Settings").action(move || {
-                            workbench_command
-                                .send(LapceWorkbenchCommand::OpenSettings);
-                        }))
-                        .entry(MenuItem::new("Open Keyboard Shortcuts").action(
+                    Menu::new(i18n::t("Settings..."))
+                        .entry(MenuItem::new(i18n::t("Open Settings")).action(
                             move || {
-                                workbench_command.send(
-                                    LapceWorkbenchCommand::OpenKeyboardShortcuts,
-                                );
+                                workbench_command
+                                    .send(LapceWorkbenchCommand::OpenSettings);
                             },
-                        )),
+                        ))
+                        .entry(
+                            MenuItem::new(i18n::t("Open Keyboard Shortcuts"))
+                                .action(move || {
+                                    workbench_command.send(
+                                        LapceWorkbenchCommand::OpenKeyboardShortcuts,
+                                    );
+                                }),
+                        ),
                 )
                 .separator()
-                .entry(MenuItem::new("Quit Lapce").action(move || {
+                .entry(MenuItem::new(i18n::t("Quit Lapce")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::Quit);
                 }));
             if cfg!(target_os = "macos") {
                 menu = menu
                     .separator()
-                    .entry(MenuItem::new("Hide Lapce"))
-                    .entry(MenuItem::new("Hide Others"))
-                    .entry(MenuItem::new("Show All"))
+                    .entry(MenuItem::new(i18n::t("Hide Lapce")))
+                    .entry(MenuItem::new(i18n::t("Hide Others")))
+                    .entry(MenuItem::new(i18n::t("Show All")))
             }
             menu
         })
         .separator()
         .entry(
-            Menu::new("File")
-                .entry(MenuItem::new("New File").action(move || {
+            Menu::new(i18n::t("File"))
+                .entry(MenuItem::new(i18n::t("New File")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::NewFile);
                 }))
                 .separator()
-                .entry(MenuItem::new("Open").action(move || {
+                .entry(MenuItem::new(i18n::t("Open")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::OpenFile);
                 }))
-                .entry(MenuItem::new("Open Folder").action(move || {
+                .entry(MenuItem::new(i18n::t("Open Folder")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::OpenFolder);
                 }))
                 .separator()
-                .entry(MenuItem::new("Save").action(move || {
+                .entry(MenuItem::new(i18n::t("Save")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Focus(FocusCommand::Save),
                         data: None,
                     });
                 }))
-                .entry(MenuItem::new("Save All").action(move || {
+                .entry(MenuItem::new(i18n::t("Save All")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::SaveAll);
                 }))
                 .separator()
-                .entry(MenuItem::new("Close Folder").action(move || {
+                .entry(MenuItem::new(i18n::t("Close Folder")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::CloseFolder);
                 }))
-                .entry(MenuItem::new("Close Window").action(move || {
+                .entry(MenuItem::new(i18n::t("Close Window")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::CloseWindow);
                 })),
         )
         .entry(
-            Menu::new("Edit")
-                .entry(MenuItem::new("Cut").action(move || {
+            Menu::new(i18n::t("Edit"))
+                .entry(MenuItem::new(i18n::t("Cut")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Edit(EditCommand::ClipboardCut),
                         data: None,
                     });
                 }))
-                .entry(MenuItem::new("Copy").action(move || {
+                .entry(MenuItem::new(i18n::t("Copy")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Edit(EditCommand::ClipboardCopy),
                         data: None,
                     });
                 }))
-                .entry(MenuItem::new("Paste").action(move || {
+                .entry(MenuItem::new(i18n::t("Paste")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Edit(EditCommand::ClipboardPaste),
                         data: None,
                     });
                 }))
                 .separator()
-                .entry(MenuItem::new("Undo").action(move || {
+                .entry(MenuItem::new(i18n::t("Undo")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Edit(EditCommand::Undo),
                         data: None,
                     });
                 }))
-                .entry(MenuItem::new("Redo").action(move || {
+                .entry(MenuItem::new(i18n::t("Redo")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Edit(EditCommand::Redo),
                         data: None,
                     });
                 }))
                 .separator()
-                .entry(MenuItem::new("Find").action(move || {
+                .entry(MenuItem::new(i18n::t("Find")).action(move || {
                     lapce_command.send(LapceCommand {
                         kind: CommandKind::Focus(FocusCommand::Search),
                         data: None,
@@ -4354,35 +4558,39 @@ fn tab_secondary_click(
     let child_right = child.clone();
     let child_left = child.clone();
     menu = menu
-        .entry(MenuItem::new("Close").action(move || {
+        .entry(MenuItem::new(i18n::t("Close")).action(move || {
             internal_command.send(InternalCommand::EditorTabChildClose {
                 editor_tab_id,
                 child: child.clone(),
             });
         }))
-        .entry(MenuItem::new("Close Other Tabs").action(move || {
+        .entry(MenuItem::new(i18n::t("Close Other Tabs")).action(move || {
             internal_command.send(InternalCommand::EditorTabCloseByKind {
                 editor_tab_id,
                 child: child_other.clone(),
                 kind: TabCloseKind::CloseOther,
             });
         }))
-        .entry(MenuItem::new("Close All Tabs").action(move || {
+        .entry(MenuItem::new(i18n::t("Close All Tabs")).action(move || {
             internal_command.send(InternalCommand::EditorTabClose { editor_tab_id });
         }))
-        .entry(MenuItem::new("Close Tabs to the Right").action(move || {
-            internal_command.send(InternalCommand::EditorTabCloseByKind {
-                editor_tab_id,
-                child: child_right.clone(),
-                kind: TabCloseKind::CloseToRight,
-            });
-        }))
-        .entry(MenuItem::new("Close Tabs to the Left").action(move || {
-            internal_command.send(InternalCommand::EditorTabCloseByKind {
-                editor_tab_id,
-                child: child_left.clone(),
-                kind: TabCloseKind::CloseToLeft,
-            });
-        }));
+        .entry(
+            MenuItem::new(i18n::t("Close Tabs to the Right")).action(move || {
+                internal_command.send(InternalCommand::EditorTabCloseByKind {
+                    editor_tab_id,
+                    child: child_right.clone(),
+                    kind: TabCloseKind::CloseToRight,
+                });
+            }),
+        )
+        .entry(
+            MenuItem::new(i18n::t("Close Tabs to the Left")).action(move || {
+                internal_command.send(InternalCommand::EditorTabCloseByKind {
+                    editor_tab_id,
+                    child: child_left.clone(),
+                    kind: TabCloseKind::CloseToLeft,
+                });
+            }),
+        );
     show_context_menu(menu, None);
 }

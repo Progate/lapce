@@ -189,6 +189,10 @@ pub struct EditorConfig {
     #[field_names(desc = "If the editor should display inline completions")]
     pub enable_inline_completion: bool,
     #[field_names(
+        desc = "Suggest the words of the open documents in the same language as completions"
+    )]
+    pub word_based_suggestions: bool,
+    #[field_names(
         desc = "Set completion lens font family. If empty, it uses the inlay hint font family."
     )]
     pub completion_lens_font_family: String,
@@ -222,6 +226,10 @@ pub struct EditorConfig {
         desc = "Whether the document should be formatted when an autosave is triggered (required Format on Save)"
     )]
     pub format_on_autosave: bool,
+    #[field_names(
+        desc = "Save the document when the editor loses focus (another editor, a panel or another window)"
+    )]
+    pub autosave_on_focus_change: bool,
     #[field_names(
         desc = "If enabled the cursor treats leading soft tabs as if they are hard tabs."
     )]

@@ -28,7 +28,10 @@ use self::{
     terminal::TerminalConfig,
     ui::UIConfig,
 };
-use crate::workspace::{LapceWorkspace, LapceWorkspaceType};
+use crate::{
+    i18n::{self, Language, SYSTEM_LANGUAGE},
+    workspace::{LapceWorkspace, LapceWorkspaceType},
+};
 
 pub mod color;
 pub mod color_theme;
@@ -89,6 +92,21 @@ pub struct DropdownInfo {
     /// The currently selected item.
     pub active_index: usize,
     pub items: im::Vector<String>,
+    /// 選択肢ごとに出す文字。設定ファイルに書く値と違うとき（言語のコードに対する言語の名前・訳した選択肢）
+    pub labels: Option<im::Vector<String>>,
+}
+
+impl DropdownInfo {
+    /// `value` の選択肢に出す文字
+    pub fn label_of(&self, value: &str) -> String {
+        self.labels
+            .as_ref()
+            .and_then(|labels| {
+                let index = self.items.iter().position(|item| item == value)?;
+                labels.get(index).cloned()
+            })
+            .unwrap_or_else(|| value.to_string())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -108,6 +126,9 @@ pub struct LapceConfig {
     pub plugins: HashMap<String, HashMap<String, serde_json::Value>>,
     #[serde(skip)]
     pub color: ThemeColor,
+    /// `core.language` が指す画面の言語（→ [`crate::i18n`]）
+    #[serde(skip)]
+    pub ui_language: Language,
     #[serde(skip)]
     pub available_color_themes: HashMap<String, (String, config::Config)>,
     #[serde(skip)]
@@ -142,6 +163,9 @@ impl LapceConfig {
                 DEFAULT_LAPCE_CONFIG.clone()
             }
         };
+
+        lapce_config.ui_language =
+            Language::from_setting(&lapce_config.core.language);
 
         lapce_config.available_color_themes =
             Self::load_color_themes(disabled_volts, extra_plugin_paths);
@@ -882,6 +906,28 @@ impl LapceConfig {
     /// update the dropdown items.
     pub fn get_dropdown_info(&self, kind: &str, key: &str) -> Option<DropdownInfo> {
         match (kind, key) {
+            ("core", "language") => {
+                let items: im::Vector<String> = std::iter::once(SYSTEM_LANGUAGE)
+                    .chain(Language::ALL.map(Language::code))
+                    .map(str::to_string)
+                    .collect();
+                Some(DropdownInfo {
+                    active_index: items
+                        .iter()
+                        .position(|item| item == &self.core.language)
+                        .unwrap_or(0),
+                    labels: Some(
+                        std::iter::once(i18n::t("System").to_string())
+                            .chain(
+                                Language::ALL.map(|language| {
+                                    language.native_name().to_string()
+                                }),
+                            )
+                            .collect(),
+                    ),
+                    items,
+                })
+            }
             ("core", "color-theme") => Some(DropdownInfo {
                 active_index: self
                     .color_theme_list
@@ -889,6 +935,7 @@ impl LapceConfig {
                     .position(|s| s == &self.color_theme.name)
                     .unwrap_or(0),
                 items: self.color_theme_list.clone(),
+                labels: None,
             }),
             ("core", "icon-theme") => Some(DropdownInfo {
                 active_index: self
@@ -897,6 +944,7 @@ impl LapceConfig {
                     .position(|s| s == &self.icon_theme.name)
                     .unwrap_or(0),
                 items: self.icon_theme_list.clone(),
+                labels: None,
             }),
             ("editor", "wrap-style") => Some(DropdownInfo {
                 // TODO: it would be better to have the text not be the default kebab-case when
@@ -909,6 +957,12 @@ impl LapceConfig {
                     .position(|w| w == self.editor.wrap_style)
                     .unwrap_or(0),
                 items: self.wrap_style_list.clone(),
+                labels: Some(
+                    self.wrap_style_list
+                        .iter()
+                        .map(|item| i18n::pt("wrap-style", item))
+                        .collect(),
+                ),
             }),
             ("ui", "tab-close-button") => Some(DropdownInfo {
                 active_index: self.ui.tab_close_button as usize,
@@ -917,6 +971,13 @@ impl LapceConfig {
                     .map(|s| s.to_string())
                     .sorted()
                     .collect(),
+                labels: Some(
+                    ui::TabCloseButton::VARIANTS
+                        .iter()
+                        .sorted()
+                        .map(|s| i18n::pt("tab-close-button", s))
+                        .collect(),
+                ),
             }),
             ("ui", "tab-separator-height") => Some(DropdownInfo {
                 active_index: self.ui.tab_separator_height as usize,
@@ -925,6 +986,13 @@ impl LapceConfig {
                     .map(|s| s.to_string())
                     .sorted()
                     .collect(),
+                labels: Some(
+                    ui::TabSeparatorHeight::VARIANTS
+                        .iter()
+                        .sorted()
+                        .map(|s| i18n::pt("tab-separator-height", s))
+                        .collect(),
+                ),
             }),
             ("terminal", "default-profile") => Some(DropdownInfo {
                 active_index: self
@@ -941,6 +1009,7 @@ impl LapceConfig {
                     })
                     .unwrap_or(0),
                 items: self.terminal.profiles.clone().into_keys().collect(),
+                labels: None,
             }),
             _ => None,
         }

@@ -18,12 +18,16 @@ use crate::{
     app::{clickable_icon, not_clickable_icon, tooltip_label, window_menu},
     command::{LapceCommand, LapceWorkbenchCommand, WindowCommand},
     config::{LapceConfig, color::LapceColor, icon::LapceIcons},
+    i18n,
     listener::Listener,
     main_split::MainSplitData,
     update::ReleaseInfo,
     window_tab::WindowTabData,
     workspace::LapceWorkspace,
 };
+
+/// BrowserOS（WASI）の中で動いているか。窓の枠・SSH・更新・デバッガーなど、そこで使えないものの口を隠すのに使う
+const IS_WASI: bool = cfg!(target_os = "wasi");
 
 fn left(
     workspace: Arc<LapceWorkspace>,
@@ -35,6 +39,9 @@ fn left(
 ) -> impl View {
     let is_local = workspace.kind.is_local();
     let is_macos = cfg!(target_os = "macos");
+    // BrowserOS（WASI）の窓は枠と題を持たない（枠は WM が描くか、埋め込む側のタブが持つ）。
+    // 枠の中に Linux 版の帯を描くと macOS の枠と Windows 風のボタンが並ぶので、帯は macOS 版と同じ並びにする
+    let is_macos_like = is_macos || IS_WASI;
     stack((
         empty().style(move |s| {
             let should_hide = if is_macos {
@@ -51,19 +58,19 @@ fn left(
                     .color(config.color(LapceColor::LAPCE_ICON_ACTIVE))
             },
         ))
-        .style(move |s| s.margin_horiz(10.0).apply_if(is_macos, |s| s.hide())),
+        .style(move |s| s.margin_horiz(10.0).apply_if(is_macos_like, |s| s.hide())),
         not_clickable_icon(
             || LapceIcons::MENU,
             || false,
             || false,
-            || "Menu",
+            || i18n::t("Menu"),
             config,
         )
         .popout_menu(move || window_menu(lapce_command, workbench_command))
         .style(move |s| {
             s.margin_left(4.0)
                 .margin_right(6.0)
-                .apply_if(is_macos, |s| s.hide())
+                .apply_if(is_macos_like, |s| s.hide())
         }),
         tooltip_label(
             config,
@@ -81,12 +88,12 @@ fn left(
                     })
                 },
             )),
-            || "Connect to Remote",
+            || i18n::t("Connect to Remote"),
         )
         .popout_menu(move || {
             #[allow(unused_mut)]
             let mut menu = Menu::new("").entry(
-                MenuItem::new("Connect to SSH Host").action(move || {
+                MenuItem::new(i18n::t("Connect to SSH Host")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::ConnectSshHost);
                 }),
             );
@@ -95,21 +102,23 @@ fn left(
                     matches!(p, ProxyStatus::Connecting | ProxyStatus::Connected)
                 })
             {
-                menu = menu.entry(MenuItem::new("Disconnect remote").action(
-                    move || {
+                menu = menu.entry(
+                    MenuItem::new(i18n::t("Disconnect remote")).action(move || {
                         workbench_command
                             .send(LapceWorkbenchCommand::DisconnectRemote);
-                    },
-                ));
+                    }),
+                );
             }
             #[cfg(windows)]
             {
-                menu = menu.entry(MenuItem::new("Connect to WSL Host").action(
-                    move || {
-                        workbench_command
-                            .send(LapceWorkbenchCommand::ConnectWslHost);
-                    },
-                ));
+                menu = menu.entry(
+                    MenuItem::new(i18n::t("Connect to WSL Host")).action(
+                        move || {
+                            workbench_command
+                                .send(LapceWorkbenchCommand::ConnectWslHost);
+                        },
+                    ),
+                );
             }
             menu
         })
@@ -131,10 +140,12 @@ fn left(
                     None => Color::TRANSPARENT,
                 }
             };
+            // BrowserOS からは SSH の先へ繋げない（ソケットを外へ開けない）ので、繋ぐ口を出さない
             s.height_pct(100.0)
                 .padding_horiz(10.0)
                 .items_center()
                 .background(color)
+                .apply_if(IS_WASI, |s| s.hide())
                 .hover(|s| {
                     s.cursor(CursorStyle::Pointer).background(
                         config.color(LapceColor::PANEL_HOVERED_BACKGROUND),
@@ -180,7 +191,7 @@ fn middle(
             },
             || false,
             move || !can_jump_backward.get(),
-            || "Jump Backward",
+            || i18n::t("Jump Backward"),
             config,
         )
         .style(move |s| s.margin_horiz(6.0))
@@ -193,7 +204,7 @@ fn middle(
             },
             || false,
             move || !can_jump_forward.get(),
-            || "Jump Forward",
+            || i18n::t("Jump Forward"),
             config,
         )
         .style(move |s| s.margin_right(6.0))
@@ -204,17 +215,24 @@ fn middle(
             || LapceIcons::PALETTE_MENU,
             || false,
             || false,
-            || "Open Folder / Recent Workspace",
+            || i18n::t("Open Folder / Recent Workspace"),
             config,
         )
         .popout_menu(move || {
-            Menu::new("")
-                .entry(MenuItem::new("Open Folder").action(move || {
+            let menu = Menu::new("");
+            // WASI にはフォルダーを選ぶ画面が無く（rfd は None を返す）、選んでも何も開かないので出さない
+            let menu = if IS_WASI {
+                menu
+            } else {
+                menu.entry(MenuItem::new(i18n::t("Open Folder")).action(move || {
                     workbench_command.send(LapceWorkbenchCommand::OpenFolder);
                 }))
-                .entry(MenuItem::new("Open Recent Workspace").action(move || {
+            };
+            menu.entry(MenuItem::new(i18n::t("Open Recent Workspace")).action(
+                move || {
                     workbench_command.send(LapceWorkbenchCommand::PaletteWorkspace);
-                }))
+                },
+            ))
         })
     };
 
@@ -244,7 +262,7 @@ fn middle(
                     if let Some(s) = local_workspace.display() {
                         s
                     } else {
-                        "Open Folder".to_string()
+                        i18n::t("Open Folder").to_string()
                     }
                 })
                 .style(|s| s.padding_left(10).padding_right(5).selectable(false)),
@@ -282,10 +300,11 @@ fn middle(
                 },
                 || false,
                 || false,
-                || "Run and Debug",
+                || i18n::t("Run and Debug"),
                 config,
             )
-            .style(move |s| s.margin_horiz(6.0)),
+            // WASI ではデバッガー（DAP）を起こせないので、走らせる口ごと出さない（下の Debug の板も同じ。→ panel/kind.rs）
+            .style(move |s| s.margin_horiz(6.0).apply_if(IS_WASI, |s| s.hide())),
             drag_window_area(empty())
                 .style(|s| s.height_pct(100.0).flex_basis(0.0).flex_grow(1.0f32)),
         ))
@@ -336,50 +355,63 @@ fn right(
                 || LapceIcons::SETTINGS,
                 || false,
                 || false,
-                || "Settings",
+                || i18n::t("Settings"),
                 config,
             )
             .popout_menu(move || {
-                Menu::new("")
-                    .entry(MenuItem::new("Command Palette").action(move || {
-                        workbench_command.send(LapceWorkbenchCommand::PaletteCommand)
-                    }))
+                let menu = Menu::new("")
+                    .entry(MenuItem::new(i18n::t("Command Palette")).action(
+                        move || {
+                            workbench_command
+                                .send(LapceWorkbenchCommand::PaletteCommand)
+                        },
+                    ))
                     .separator()
-                    .entry(MenuItem::new("Open Settings").action(move || {
-                        workbench_command.send(LapceWorkbenchCommand::OpenSettings)
-                    }))
-                    .entry(MenuItem::new("Open Keyboard Shortcuts").action(
+                    .entry(MenuItem::new(i18n::t("Open Settings")).action(
+                        move || {
+                            workbench_command
+                                .send(LapceWorkbenchCommand::OpenSettings)
+                        },
+                    ))
+                    .entry(MenuItem::new(i18n::t("Open Keyboard Shortcuts")).action(
                         move || {
                             workbench_command
                                 .send(LapceWorkbenchCommand::OpenKeyboardShortcuts)
                         },
                     ))
-                    .entry(MenuItem::new("Open Theme Color Settings").action(
-                        move || {
-                            workbench_command
-                                .send(LapceWorkbenchCommand::OpenThemeColorSettings)
-                        },
-                    ))
-                    .separator()
-                    .entry(if let Some(v) = latest_version.get_untracked() {
+                    .entry(
+                        MenuItem::new(i18n::t("Open Theme Color Settings")).action(
+                            move || {
+                                workbench_command.send(
+                                    LapceWorkbenchCommand::OpenThemeColorSettings,
+                                )
+                            },
+                        ),
+                    )
+                    .separator();
+                // WASI では新しい版を取りに行けない（HTTP が無い）ので、更新の項目は出さない
+                let menu = if IS_WASI {
+                    menu
+                } else {
+                    menu.entry(if let Some(v) = latest_version.get_untracked() {
                         if update_in_progress.get_untracked() {
-                            MenuItem::new(format!("Update in progress ({v})"))
+                            MenuItem::new(i18n::tf("Update in progress ({})", &[&v]))
                                 .enabled(false)
                         } else {
-                            MenuItem::new(format!("Restart to update ({v})")).action(
-                                move || {
+                            MenuItem::new(i18n::tf("Restart to update ({})", &[&v]))
+                                .action(move || {
                                     workbench_command
                                         .send(LapceWorkbenchCommand::RestartToUpdate)
-                                },
-                            )
+                                })
                         }
                     } else {
-                        MenuItem::new("No update available").enabled(false)
+                        MenuItem::new(i18n::t("No update available")).enabled(false)
                     })
                     .separator()
-                    .entry(MenuItem::new("About Lapce").action(move || {
-                        workbench_command.send(LapceWorkbenchCommand::ShowAbout)
-                    }))
+                };
+                menu.entry(MenuItem::new(i18n::t("About Lapce")).action(move || {
+                    workbench_command.send(LapceWorkbenchCommand::ShowAbout)
+                }))
             }),
             container(label(|| "1".to_string()).style(move |s| {
                 let config = config.get();
@@ -487,7 +519,7 @@ pub fn window_controls_view(
             },
             || false,
             || false,
-            || "Minimize",
+            || i18n::t("Minimize"),
             config,
         )
         .style(|s| s.margin_right(16.0).margin_left(10.0)),
@@ -506,7 +538,7 @@ pub fn window_controls_view(
             },
             || false,
             || false,
-            || "Maximize",
+            || i18n::t("Maximize"),
             config,
         )
         .style(|s| s.margin_right(16.0)),
@@ -517,7 +549,7 @@ pub fn window_controls_view(
             },
             || false,
             || false,
-            || "Close Window",
+            || i18n::t("Close Window"),
             config,
         )
         .style(|s| s.margin_right(6.0)),
@@ -525,6 +557,7 @@ pub fn window_controls_view(
     .style(move |s| {
         s.apply_if(
             cfg!(target_os = "macos")
+                || IS_WASI
                 || !config.get_untracked().core.custom_titlebar
                 || (is_title && num_window_tabs.get() > 1),
             |s| s.hide(),

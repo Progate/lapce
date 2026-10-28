@@ -26,6 +26,7 @@ use crate::{
     app::not_clickable_icon,
     command::InternalCommand,
     config::{color::LapceColor, icon::LapceIcons},
+    i18n,
     plugin::{AvailableVoltData, InstalledVoltData, PluginData, VoltIcon},
     text_input::TextInputBuilder,
     window_tab::{Focus, WindowTabData},
@@ -75,12 +76,12 @@ pub fn plugin_panel(
 
     PanelBuilder::new(config, position)
         .add(
-            "Installed",
+            i18n::t("Installed"),
             installed_view(plugin.clone()),
             window_tab_data.panel.section_open(PanelSection::Installed),
         )
         .add(
-            "Available",
+            i18n::t("Available"),
             available_view(plugin.clone(), core_rpc),
             window_tab_data.panel.section_open(PanelSection::Available),
         )
@@ -141,11 +142,11 @@ fn installed_view(plugin: PluginData) -> impl View {
                             if disabled.with(|d| d.contains(&volt_id))
                                 || workspace_disabled.with(|d| d.contains(&volt_id))
                             {
-                                "Disabled".to_string()
+                                i18n::t("Disabled").to_string()
                             } else if volt.meta.with(|m| {
                                 volt.latest.with(|i| i.version != m.version)
                             }) {
-                                "Upgrade".to_string()
+                                i18n::t("Upgrade").to_string()
                             } else {
                                 format!("v{}", volt.meta.with(|m| m.version.clone()))
                             }
@@ -162,7 +163,7 @@ fn installed_view(plugin: PluginData) -> impl View {
                         || LapceIcons::SETTINGS,
                         || false,
                         || false,
-                        || "Options",
+                        || i18n::t("Options"),
                         config,
                     )
                     .style(|s| s.padding_left(6.0))
@@ -233,11 +234,11 @@ fn available_view(plugin: PluginData, core_rpc: CoreRpcHandler) -> impl View {
             });
             label(move || {
                 if installed.get() {
-                    "Installed".to_string()
+                    i18n::t("Installed").to_string()
                 } else if installing.get() {
-                    "Installing".to_string()
+                    i18n::t("Installing").to_string()
                 } else {
-                    "Install".to_string()
+                    i18n::t("Install").to_string()
                 }
             })
             .disabled(move || installed.get() || installing.get())
@@ -356,7 +357,7 @@ fn available_view(plugin: PluginData, core_rpc: CoreRpcHandler) -> impl View {
                 TextInputBuilder::new()
                     .is_focused(is_focused)
                     .build_editor(editor.clone())
-                    .placeholder(|| "Search extensions".to_string())
+                    .placeholder(|| i18n::t("Search extensions").to_string())
                     .on_cursor_pos(move |point| {
                         cursor_x.set(point.x);
                     })

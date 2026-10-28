@@ -21,6 +21,7 @@ use crate::{
     command::LapceWorkbenchCommand,
     config::{LapceConfig, color::LapceColor, icon::LapceIcons},
     editor::EditorData,
+    i18n,
     listener::Listener,
     palette::kind::PaletteKind,
     panel::{kind::PanelKind, position::PanelContainerPosition},
@@ -212,10 +213,12 @@ pub fn status(
                 .on_click_stop(move |_| {
                     panel.show_panel(&PanelKind::Problem);
                 })
+                // 数えるのは LSP の診断で、WASI では LSP を起こせず常に 0 なので出さない（Problems の板も出さない。→ panel/kind.rs）
                 .style(move |s| {
                     s.height_pct(100.0)
                         .padding_horiz(10.0)
                         .items_center()
+                        .apply_if(cfg!(target_os = "wasi"), |s| s.hide())
                         .hover(|s| {
                             s.cursor(CursorStyle::Pointer).background(
                                 config
@@ -256,7 +259,7 @@ pub fn status(
                     },
                     || false,
                     || false,
-                    || "Toggle Left Panel",
+                    || i18n::t("Toggle Left Panel"),
                     config,
                 )
             },
@@ -283,7 +286,7 @@ pub fn status(
                     },
                     || false,
                     || false,
-                    || "Toggle Bottom Panel",
+                    || i18n::t("Toggle Bottom Panel"),
                     config,
                 )
             },
@@ -308,9 +311,11 @@ pub fn status(
                     },
                     || false,
                     || false,
-                    || "Toggle Right Panel",
+                    || i18n::t("Toggle Right Panel"),
                     config,
                 )
+                // 右に置く板（Document Symbol）は WASI では働かず、右は空になるので切り替えも出さない
+                .style(|s| s.apply_if(cfg!(target_os = "wasi"), |s| s.hide()))
             },
         ))
         .style(move |s| {
@@ -330,24 +335,27 @@ pub fn status(
                         .buffer
                         .with(|buffer| cursor.get_line_col_char(buffer))
                     {
-                        status = format!(
+                        status = i18n::tf(
                             "Ln {}, Col {}, Char {}",
-                            line + 1,
-                            column + 1,
-                            character,
+                            &[&(line + 1), &(column + 1), &character],
                         );
                     }
                     if let Some(selection) = cursor.get_selection() {
                         let selection_range = selection.0.abs_diff(selection.1);
 
                         if selection.0 != selection.1 {
-                            status =
-                                format!("{status} ({selection_range} selected)");
+                            status = i18n::tf(
+                                "{} ({} selected)",
+                                &[&status, &selection_range],
+                            );
                         }
                     }
                     let selection_count = cursor.get_selection_count();
                     if selection_count > 1 {
-                        status = format!("{status} {selection_count} selections");
+                        status = i18n::tf(
+                            "{} {} selections",
+                            &[&status, &selection_count],
+                        );
                     }
                     return status;
                 }

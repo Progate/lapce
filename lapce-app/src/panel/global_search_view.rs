@@ -17,6 +17,7 @@ use crate::{
     editor::location::{EditorLocation, EditorPosition},
     focus_text::focus_text,
     global_search::{GlobalSearchData, SearchMatchData},
+    i18n,
     listener::Listener,
     text_input::TextInputBuilder,
     window_tab::{Focus, WindowTabData},
@@ -57,7 +58,7 @@ pub fn global_search_panel(
                     },
                     move || case_matching.get() == CaseMatching::Exact,
                     || false,
-                    || "Case Sensitive",
+                    || i18n::t("Case Sensitive"),
                     config,
                 )
                 .style(|s| s.padding_vert(4.0)),
@@ -70,7 +71,7 @@ pub fn global_search_panel(
                     },
                     move || whole_word.get(),
                     || false,
-                    || "Whole Word",
+                    || i18n::t("Whole Word"),
                     config,
                 )
                 .style(|s| s.padding_left(6.0)),
@@ -83,7 +84,7 @@ pub fn global_search_panel(
                     },
                     move || is_regex.get(),
                     || false,
-                    || "Use Regex",
+                    || i18n::t("Use Regex"),
                     config,
                 )
                 .style(|s| s.padding_left(6.0)),

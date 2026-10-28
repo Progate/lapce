@@ -72,6 +72,7 @@ use crate::{
     find::Find,
     global_search::GlobalSearchData,
     hover::HoverData,
+    i18n,
     id::WindowTabId,
     inline_completion::InlineCompletionData,
     keypress::{EventRef, KeyPressData, KeyPressFocus, condition::Condition},
@@ -394,6 +395,11 @@ impl WindowTabData {
         });
 
         let main_split = MainSplitData::new(cx, common.clone());
+        // Word based suggestions read the open documents, which the main split keeps
+        let docs = main_split.docs;
+        common
+            .completion
+            .update(|completion| completion.set_docs(docs));
         let code_action =
             cx.create_rw_signal(CodeActionData::new(cx, common.clone()));
         let source_control =
@@ -736,7 +742,7 @@ impl WindowTabData {
             OpenFolder => {
                 if !self.workspace.kind.is_remote() {
                     let window_command = self.common.window_common.window_command;
-                    let mut options = FileDialogOptions::new().title("Choose a folder").select_directories();
+                    let mut options = FileDialogOptions::new().title(i18n::t("Choose a folder")).select_directories();
                     options = if let Some(parent) = self.workspace.path.as_ref().and_then(|x| x.parent()) {
                         options.force_starting_directory(parent)
                     } else {
@@ -777,7 +783,7 @@ impl WindowTabData {
             OpenFile => {
                 if !self.workspace.kind.is_remote() {
                     let internal_command = self.common.internal_command;
-                    let options = FileDialogOptions::new().title("Choose a file");
+                    let options = FileDialogOptions::new().title(i18n::t("Choose a file"));
                     open_file(options, move |file| {
                         if let Some(mut file) = file {
                             internal_command.send(InternalCommand::OpenFile {

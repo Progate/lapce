@@ -4,7 +4,8 @@
 [BrowserOS](https://github.com/Progate/packages/tree/main/packages/browser-os)（ブラウザーの中で動く小さな OS）の
 windowserver に窓を開いて動かすための変更である。使う側は `@progate/browser-editor`。
 
-変更はすべて `#[cfg(target_os = "wasi")]` の下にあり、**ネイティブ版の振る舞いは変えていない**。
+WASI のための変更はすべて `#[cfg(target_os = "wasi")]` の下にあり、**ネイティブ版の振る舞いは変えていない**。
+例外は画面の言語（→ 下の「画面の言語」）で、こちらはネイティブ版でも効く。
 
 ## 組み方
 
@@ -29,18 +30,34 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
 - **floem** は WASI では GPU を使わず tiny-skia で描く（BrowserOS の中のプロセスから WebGPU は呼べない）
 - 倍率は `WINIT_SCALE_FACTOR` で受け取る（画面の画素と見た目の 1px の比はホストが決める）
 
+## 画面の言語（本物の Lapce には無い）
+
+メニュー・パネル・コマンド パレット・設定などの画面の文字を、日本語でも出せるようにした（`lapce-app/src/i18n.rs`）。
+これは WASI に限らない変更で、ネイティブ版でも効く。
+
+- 言語は設定の `core.language`（`system`・`en`・`ja`）で選ぶ。既定の `system` は、ほかの Linux のプログラムと同じく
+  ロケールの環境変数（`LC_ALL`・`LC_MESSAGES`・`LANG`・`LANGUAGE`）に従う。起動する側が `LANG=ja_JP.UTF-8` を渡せば日本語で開き、
+  利用者は設定で英語に戻せる
+- gettext と同じく、ソースに書いた英語の原文がキーで、訳は `defaults/locales/ja/*.toml` に置く。訳の無い文字は英語のまま出る
+- 言語は起動したときに決まる。設定で選び直した言語は、VS Code の表示言語と同じく次に起動したときから効く
+  （Lapce は窓のビューとデータを一緒に作るので、動いている途中でビューだけを作り直せない）
+- コマンド パレットとキーボード ショートカットは、訳したコマンド名でも英語の名前でも探せる
+
 ## OS に無いもの・代わりにしたもの
 
 | ネイティブ版 | WASI 版 |
 | --- | --- |
 | 自分を子プロセスで起動し直して端末を空ける | しない（子プロセスは std から起動できない） |
-| libgit2 | BrowserOS の `git` を `posix_spawn` で呼ぶ（`lapce-proxy/src/git_wasi.rs`・`wasi_process.rs`） |
-| inotify / FSEvents（notify） | BrowserOS の inotify（`browser_os_inotify`。`lapce-proxy/src/inotify_wasi.rs`） |
-| 文法を dlopen で読む | 主な言語の文法を静的に組み込み、ハイライトは文法の crate 同梱の定義を使う（`lapce-core/src/language.rs`） |
+| libgit2 | BrowserOS の `git` を Linux の syscall（`clone` の vfork の形と `execve`）で起こす（`lapce-proxy/src/git_wasi.rs`・`wasi_process.rs`。syscall は `linux_wasi.rs`） |
+| inotify / FSEvents（notify） | Linux の inotify（`inotify_init1(2)` ほか。`lapce-proxy/src/inotify_wasi.rs`） |
+| 文法を dlopen で読む | 同じく `libtree-sitter-<name>.so` を dlopen する。文法は wasm のサイドモジュールで、ローダーは BrowserOS の browser-dyld。利用者の置き場に無ければ OS が配る `/usr/lib/lapce/grammars`・`/usr/share/lapce/queries` を見る（`lapce-core/src/language.rs`・`directory.rs`）。組むのは @progate/browser-editor の `scripts/build-wasm.mjs` |
+| 窓の枠と帯 | 枠は WM か埋め込む側が持つので、帯は macOS 版と同じ並びにし、ロゴ・メニュー・窓のボタン・SSH・更新・Run and Debug を出さない（`lapce-app/src/title.rs`） |
+| 拡張・LSP・デバッガーの板 | 動かないので並びから外す（種類は残す。`lapce-app/src/panel/kind.rs` の `is_available`） |
+| （無い） | `--read-only` でワークスペースごと読み取り専用にする。proxy が書き換えを断り、端末と git を起こさない（`lapce-core/src/read_only.rs`） |
 | `directories` | Linux と同じ XDG の置き場（`lapce-core/src/xdg.rs`） |
 | ゴミ箱（trash） | freedesktop.org のゴミ箱（`~/.local/share/Trash`）へ自分で移す |
 | プラグイン（wasmtime） | 未対応（起動しようとすると理由付きで失敗する） |
-| 端末（pty と epoll の event_loop） | BrowserOS の pty（`browser_os_pty` の `openpty`）の上で `posix_spawn_tty` でシェルを起動する（`lapce-proxy/src/terminal_wasi.rs`） |
+| 端末（pty と epoll の event_loop） | Linux の openpty(3) と同じく `/dev/ptmx` を開いた pty の上で、`setsid(2)` してからシェルを起動する（`lapce-proxy/src/terminal_wasi.rs`） |
 | HTTP（プラグインの取得・更新の確認） | 未対応 |
 | 単一起動の IPC | 無し（毎回自分で窓を開く） |
 

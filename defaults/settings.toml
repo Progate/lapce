@@ -2,6 +2,7 @@
 
 [core]
 modal = false
+language = "system"
 color-theme = "Lapce Dark"
 icon-theme = "Lapce Codicons"
 custom-titlebar = true
@@ -38,6 +39,7 @@ highlight-selection-occurrences = true
 highlight-scope-lines = false
 autosave-interval = 0
 format-on-autosave = true
+autosave-on-focus-change = false
 normalize-line-endings = true
 enable-inlay-hints = true
 inlay-hint-font-family = ""
@@ -50,6 +52,7 @@ error-lens-font-size = 0
 error-lens-multiline = false
 enable-completion-lens = false
 enable-inline-completion = true
+word-based-suggestions = true
 completion-lens-font-family = ""
 completion-lens-font-size = 0
 blink-interval = 500                                         # ms

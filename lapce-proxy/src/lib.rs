@@ -10,12 +10,16 @@ mod git_wasi;
 #[cfg(target_os = "wasi")]
 mod inotify_wasi;
 #[cfg(target_os = "wasi")]
-pub mod wasi_process;
+mod linux_wasi;
+#[cfg(target_os = "wasi")]
+pub mod local_socket_wasi;
 pub mod plugin;
 #[cfg(not(target_os = "wasi"))]
 pub mod terminal;
 #[cfg(target_os = "wasi")]
 pub mod terminal_wasi;
+#[cfg(target_os = "wasi")]
+pub mod wasi_process;
 pub mod watcher;
 
 use std::{
@@ -261,7 +265,10 @@ pub mod wasi_http {
             match self {}
         }
 
-        pub fn copy_to<W: std::io::Write + ?Sized>(&mut self, _out: &mut W) -> Result<u64> {
+        pub fn copy_to<W: std::io::Write + ?Sized>(
+            &mut self,
+            _out: &mut W,
+        ) -> Result<u64> {
             match *self {}
         }
     }

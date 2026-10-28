@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -46,6 +46,7 @@ use crate::{
     editor_tab::{
         EditorTabChild, EditorTabChildSource, EditorTabData, EditorTabInfo,
     },
+    i18n,
     id::{
         DiffEditorId, EditorTabId, KeymapId, SettingsId, SplitId,
         ThemeColorSettingsId, VoltViewId,
@@ -385,6 +386,21 @@ impl Editors {
     ) -> O {
         self.0.with_untracked(f)
     }
+
+    /// Saves every edited document once the window loses focus
+    /// (`editor.autosave-on-focus-change`). The focused editor does not get
+    /// its own focus-lost event in that case, so the window has to do it.
+    pub fn save_on_focus_change(&self) {
+        self.with_editors_untracked(|editors| {
+            let mut docs = HashSet::new();
+            for editor in editors.values() {
+                // Split views share one document; saving it once is enough
+                if docs.insert(Rc::as_ptr(&editor.doc())) {
+                    editor.save_on_focus_change();
+                }
+            }
+        });
+    }
 }
 
 #[derive(Clone)]
@@ -632,6 +648,15 @@ impl MainSplitData {
                 self.editors,
                 self.common.clone(),
             );
+            // 読み取り専用で開いたワークスペースは、proxy の答え（NewBufferResponse）を待たずに読み取り専用にする。
+            // 答えが着くまでのあいだに打った文字が文書に入ってしまうため
+            if lapce_core::read_only::is_enabled() {
+                doc.content.update(|content| {
+                    if let DocContent::File { read_only, .. } = content {
+                        *read_only = true;
+                    }
+                });
+            }
             let doc = Rc::new(doc);
             self.docs.update(|docs| {
                 docs.insert(path.clone(), doc.clone());
@@ -2027,7 +2052,7 @@ impl MainSplitData {
                             let doc = doc.clone();
                             internal_command.send(InternalCommand::HideAlert);
                             save_as(
-                                FileDialogOptions::new().title("Save File"),
+                                FileDialogOptions::new().title(i18n::t("Save File")),
                                 move |file: Option<FileInfo>| {
                                     let main_split = main_split.clone();
                                     let child = child.clone();
@@ -2056,7 +2081,7 @@ impl MainSplitData {
                             );
                         });
                         Some(AlertButton {
-                            text: "Save".to_string(),
+                            text: i18n::t("Save").to_string(),
                             action: save_action,
                         })
                     }
@@ -2079,7 +2104,7 @@ impl MainSplitData {
                             });
                         });
                         Some(AlertButton {
-                            text: "Save".to_string(),
+                            text: i18n::t("Save").to_string(),
                             action: save_action,
                         })
                     }
@@ -2092,15 +2117,18 @@ impl MainSplitData {
                     self.common
                         .internal_command
                         .send(InternalCommand::ShowAlert {
-                            title: format!(
-                                "Do you want to save the changes you made to {name}?"
+                            title: i18n::tf(
+                                "Do you want to save the changes you made to {}?",
+                                &[&name],
                             ),
-                            msg: "Your changes will be lost if you don't save them."
-                                .to_string(),
+                            msg: i18n::t(
+                                "Your changes will be lost if you don't save them.",
+                            )
+                            .to_string(),
                             buttons: vec![
                                 save_button,
                                 AlertButton {
-                                    text: "Don't Save".to_string(),
+                                    text: i18n::t("Don't Save").to_string(),
                                     action: Rc::new(move || {
                                         internal_command
                                             .send(InternalCommand::HideAlert);
@@ -2590,7 +2618,7 @@ impl MainSplitData {
     pub fn save_scratch_doc(&self, doc: Rc<Doc>) {
         let main_split = self.clone();
         save_as(
-            FileDialogOptions::new().title("Save File"),
+            FileDialogOptions::new().title(i18n::t("Save File")),
             move |file: Option<FileInfo>| {
                 if let Some(mut file) = file {
                     main_split.save_as(
@@ -2611,7 +2639,7 @@ impl MainSplitData {
     pub fn save_scratch_doc2(&self, doc: Rc<Doc>) {
         let main_split = self.clone();
         save_as(
-            FileDialogOptions::new().title("Save File"),
+            FileDialogOptions::new().title(i18n::t("Save File")),
             move |file: Option<FileInfo>| {
                 if let Some(mut file) = file {
                     main_split.save_as2(

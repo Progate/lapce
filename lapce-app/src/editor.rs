@@ -116,9 +116,22 @@ impl EditorInfo {
         let editors = &data.editors;
         let common = data.common.clone();
         match &self.content {
-            DocContent::File { path, .. } => {
+            DocContent::File { path, read_only } => {
                 let (doc, new_doc) =
                     data.get_doc(path.clone(), self.unsaved.clone());
+                // 覚え書きで読み取り専用と書いた文書は、読み取り専用のまま戻す。`get_doc` は読み取り専用かを
+                // proxy の答え（読めないファイルかどうか）だけで決めるので、戻さないと模範解答などを
+                // 見せるために置いた形でも書き換えられてしまう（→ browser-editor の `editorWorkspaceFiles`）
+                #[cfg(target_os = "wasi")]
+                if *read_only {
+                    doc.content.update(|content| {
+                        if let DocContent::File { read_only, .. } = content {
+                            *read_only = true;
+                        }
+                    });
+                }
+                #[cfg(not(target_os = "wasi"))]
+                let _ = read_only;
                 let editor = editors.make_from_doc(
                     data.scope,
                     doc,
@@ -2316,6 +2329,22 @@ impl EditorData {
         self.doc().save(after_action);
     }
 
+    /// Saves the document when focus leaves the editor (`editor.autosave-on-focus-change`).
+    /// A scratch document has no file to save to, so saving it would ask for one;
+    /// it is left alone like the interval autosave does (→ `Doc::check_auto_save`).
+    pub fn save_on_focus_change(&self) {
+        let config = self.common.config.get_untracked();
+        if !config.editor.autosave_on_focus_change {
+            return;
+        }
+        let doc = self.doc();
+        let is_file = matches!(doc.content.get_untracked(), DocContent::File { .. });
+        if !is_file || doc.is_pristine() {
+            return;
+        }
+        self.save(config.editor.format_on_autosave, || {});
+    }
+
     pub fn save(
         &self,
         allow_formatting: bool,
@@ -2987,14 +3016,15 @@ impl EditorData {
         for cmd in cmds {
             if let Some(cmd) = cmd {
                 menu = menu.entry(
-                    MenuItem::new(cmd.desc().unwrap_or_else(|| cmd.str())).action(
-                        move || {
-                            lapce_command.send(LapceCommand {
-                                kind: cmd.clone(),
-                                data: None,
-                            })
-                        },
-                    ),
+                    MenuItem::new(
+                        cmd.title().unwrap_or_else(|| cmd.str().to_string()),
+                    )
+                    .action(move || {
+                        lapce_command.send(LapceCommand {
+                            kind: cmd.clone(),
+                            data: None,
+                        })
+                    }),
                 );
             } else {
                 menu = menu.separator();

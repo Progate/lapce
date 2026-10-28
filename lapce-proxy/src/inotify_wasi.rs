@@ -1,9 +1,9 @@
 //! ファイルの見張り（WASI・BrowserOS）。**Linux と同じ inotify を使う。**
 //!
 //! notify は Linux では inotify を使うが、WASI では周期的に全体を見に行く PollWatcher に
-//! なり（既定 30 秒）、保存やコミットが画面に出るまで待たされる。BrowserOS は inotify
-//! （`inotify_init1` / `inotify_add_watch` / `inotify_rm_watch`）を `browser_os_inotify` の
-//! ホスト関数として持っているので、それを直に呼ぶ。
+//! なり（既定 30 秒）、保存やコミットが画面に出るまで待たされる。BrowserOS は Linux の syscall を
+//! 受ける（→ linux_wasi.rs）ので、Linux の inotify（`inotify_init1(2)` / `inotify_add_watch(2)` /
+//! `inotify_rm_watch(2)`）を直に呼ぶ。
 //!
 //! 出来事の組み立ては notify の inotify 実装（`notify/src/inotify.rs`）を写してある。
 //! 見張りは再帰ではないので、ディレクトリができたらそこにも見張りを足し、名前の変更は
@@ -27,31 +27,20 @@ use std::{
 };
 
 use notify::{
-    Config, Error, Event, EventHandler, EventKind, RecursiveMode, Result,
-    Watcher, WatcherKind,
+    Config, Error, Event, EventHandler, EventKind, RecursiveMode, Result, Watcher,
+    WatcherKind,
     event::{
-        AccessKind, AccessMode, CreateKind, DataChange, Flag, MetadataKind, ModifyKind,
-        RemoveKind, RenameMode,
+        AccessKind, AccessMode, CreateKind, DataChange, Flag, MetadataKind,
+        ModifyKind, RemoveKind, RenameMode,
     },
 };
 use parking_lot::Mutex;
 use walkdir::WalkDir;
 
-#[link(wasm_import_module = "browser_os_inotify")]
-unsafe extern "C" {
-    #[link_name = "inotify_init1"]
-    fn host_inotify_init1(flags: i32, fd: *mut u32) -> i32;
-    #[link_name = "inotify_add_watch"]
-    fn host_inotify_add_watch(
-        fd: u32,
-        path: *const u8,
-        path_len: usize,
-        mask: u32,
-        wd: *mut i32,
-    ) -> i32;
-    #[link_name = "inotify_rm_watch"]
-    fn host_inotify_rm_watch(fd: u32, wd: i32) -> i32;
-}
+use crate::linux_wasi::{
+    self, O_CLOEXEC, O_NONBLOCK, SYS_INOTIFY_ADD_WATCH, SYS_INOTIFY_INIT1,
+    SYS_INOTIFY_RM_WATCH, address,
+};
 
 /* `linux/inotify.h` */
 const IN_MODIFY: u32 = 0x0000_0002;
@@ -66,8 +55,9 @@ const IN_MOVE_SELF: u32 = 0x0000_0800;
 const IN_Q_OVERFLOW: u32 = 0x0000_4000;
 const IN_IGNORED: u32 = 0x0000_8000;
 const IN_ISDIR: u32 = 0x4000_0000;
-/// `O_NONBLOCK`
-const IN_NONBLOCK: i32 = 0o4000;
+/// `IN_NONBLOCK`・`IN_CLOEXEC`（`O_NONBLOCK`・`O_CLOEXEC` と同じ値）
+const IN_NONBLOCK: i64 = O_NONBLOCK;
+const IN_CLOEXEC: i64 = O_CLOEXEC;
 
 /// 何も来ていないとき、次に読みに行くまでの間隔
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -78,9 +68,14 @@ fn futex_sleep(duration: Duration) {
     let _ = receiver.recv_timeout(duration);
 }
 
-fn os_error(errno: i32, path: &Path) -> Error {
-    Error::io(io::Error::other(format!("inotify failed (errno {errno})")))
-        .add_path(path.to_path_buf())
+fn os_error(error: io::Error, path: &Path) -> Error {
+    Error::io(error).add_path(path.to_path_buf())
+}
+
+/// 見張りを外す（`inotify_rm_watch(2)`）。もう無い見張りでも失敗にしない
+fn rm_watch(fd: u32, wd: i32) {
+    let _ =
+        linux_wasi::call(SYS_INOTIFY_RM_WATCH, [fd as i64, wd as i64, 0, 0, 0, 0]);
 }
 
 struct RawEvent {
@@ -95,7 +90,8 @@ fn parse_events(bytes: &[u8]) -> Vec<RawEvent> {
     let mut events = Vec::new();
     let mut offset = 0;
     while offset + 16 <= bytes.len() {
-        let field = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+        let field =
+            |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let wd = field(offset) as i32;
         let mask = field(offset + 4);
         let cookie = field(offset + 8);
@@ -107,7 +103,12 @@ fn parse_events(bytes: &[u8]) -> Vec<RawEvent> {
             let raw = &raw[..raw.iter().position(|b| *b == 0).unwrap_or(raw.len())];
             String::from_utf8_lossy(raw).into_owned()
         });
-        events.push(RawEvent { wd, mask, cookie, name });
+        events.push(RawEvent {
+            wd,
+            mask,
+            cookie,
+            name,
+        });
         offset = start + len;
     }
     events
@@ -124,7 +125,12 @@ struct State {
 }
 
 impl State {
-    fn add_watch(&mut self, path: PathBuf, is_recursive: bool, mut watch_self: bool) -> Result<()> {
+    fn add_watch(
+        &mut self,
+        path: PathBuf,
+        is_recursive: bool,
+        mut watch_self: bool,
+    ) -> Result<()> {
         if !is_recursive || !std::fs::metadata(&path).map_err(Error::io)?.is_dir() {
             return self.add_single_watch(path, false, true);
         }
@@ -133,28 +139,48 @@ impl State {
             .filter_map(|entry| entry.ok())
             .filter(|entry| entry.file_type().is_dir())
         {
-            self.add_single_watch(entry.path().to_path_buf(), is_recursive, watch_self)?;
+            self.add_single_watch(
+                entry.path().to_path_buf(),
+                is_recursive,
+                watch_self,
+            )?;
             watch_self = false;
         }
         Ok(())
     }
 
-    fn add_single_watch(&mut self, path: PathBuf, is_recursive: bool, watch_self: bool) -> Result<()> {
-        let mut mask =
-            IN_ATTRIB | IN_CREATE | IN_DELETE | IN_CLOSE_WRITE | IN_MODIFY | IN_MOVED_FROM | IN_MOVED_TO;
+    fn add_single_watch(
+        &mut self,
+        path: PathBuf,
+        is_recursive: bool,
+        watch_self: bool,
+    ) -> Result<()> {
+        let mut mask = IN_ATTRIB
+            | IN_CREATE
+            | IN_DELETE
+            | IN_CLOSE_WRITE
+            | IN_MODIFY
+            | IN_MOVED_FROM
+            | IN_MOVED_TO;
         if watch_self {
             mask |= IN_DELETE_SELF | IN_MOVE_SELF;
         }
         if let Some(&(_, old, _)) = self.watches.get(&path) {
             mask |= old;
         }
-        let bytes = path.to_string_lossy();
-        let mut wd = 0i32;
-        let errno =
-            unsafe { host_inotify_add_watch(self.fd, bytes.as_ptr(), bytes.len(), mask, &mut wd) };
-        if errno != 0 {
-            return Err(os_error(errno, &path));
-        }
+        let bytes = linux_wasi::c_path(&path.to_string_lossy());
+        let wd = linux_wasi::call(
+            SYS_INOTIFY_ADD_WATCH,
+            [
+                self.fd as i64,
+                address(bytes.as_ptr()),
+                mask as i64,
+                0,
+                0,
+                0,
+            ],
+        )
+        .map_err(|error| os_error(error, &path))? as i32;
         self.watches.insert(path.clone(), (wd, mask, is_recursive));
         self.paths.insert(wd, path);
         Ok(())
@@ -164,14 +190,18 @@ impl State {
         let Some((wd, _, is_recursive)) = self.watches.remove(&path) else {
             return Err(Error::watch_not_found().add_path(path));
         };
-        unsafe { host_inotify_rm_watch(self.fd, wd) };
+        rm_watch(self.fd, wd);
         self.paths.remove(&wd);
         if is_recursive || remove_recursive {
-            let children: Vec<PathBuf> =
-                self.watches.keys().filter(|p| p.starts_with(&path)).cloned().collect();
+            let children: Vec<PathBuf> = self
+                .watches
+                .keys()
+                .filter(|p| p.starts_with(&path))
+                .cloned()
+                .collect();
             for child in children {
                 if let Some((wd, _, _)) = self.watches.remove(&child) {
-                    unsafe { host_inotify_rm_watch(self.fd, wd) };
+                    rm_watch(self.fd, wd);
                     self.paths.remove(&wd);
                 }
             }
@@ -232,7 +262,13 @@ impl State {
                 None => root,
             };
             let is_dir = event.mask & IN_ISDIR != 0;
-            let created = || EventKind::Create(if is_dir { CreateKind::Folder } else { CreateKind::File });
+            let created = || {
+                EventKind::Create(if is_dir {
+                    CreateKind::Folder
+                } else {
+                    CreateKind::File
+                })
+            };
 
             if event.mask & IN_MOVED_FROM != 0 {
                 self.flush_rename();
@@ -240,9 +276,11 @@ impl State {
                     remove.push(path.clone());
                 }
                 self.rename_event = Some(
-                    Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::From)))
-                        .add_path(path)
-                        .set_tracker(event.cookie as usize),
+                    Event::new(EventKind::Modify(ModifyKind::Name(
+                        RenameMode::From,
+                    )))
+                    .add_path(path)
+                    .set_tracker(event.cookie as usize),
                 );
                 continue;
             }
@@ -252,12 +290,16 @@ impl State {
                         let old = from.paths.first().cloned();
                         self.send(from);
                         self.send(
-                            Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::To)))
-                                .set_tracker(event.cookie as usize)
-                                .add_path(path.clone()),
+                            Event::new(EventKind::Modify(ModifyKind::Name(
+                                RenameMode::To,
+                            )))
+                            .set_tracker(event.cookie as usize)
+                            .add_path(path.clone()),
                         );
-                        let mut both = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
-                            .set_tracker(event.cookie as usize);
+                        let mut both = Event::new(EventKind::Modify(
+                            ModifyKind::Name(RenameMode::Both),
+                        ))
+                        .set_tracker(event.cookie as usize);
                         if let Some(old) = old {
                             both = both.add_path(old);
                         }
@@ -276,8 +318,10 @@ impl State {
             }
             if event.mask & IN_MOVE_SELF != 0 {
                 self.send(
-                    Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::From)))
-                        .add_path(path.clone()),
+                    Event::new(EventKind::Modify(ModifyKind::Name(
+                        RenameMode::From,
+                    )))
+                    .add_path(path.clone()),
                 );
             }
             if event.mask & IN_CREATE != 0 {
@@ -288,8 +332,12 @@ impl State {
             }
             if event.mask & (IN_DELETE | IN_DELETE_SELF) != 0 {
                 self.send(
-                    Event::new(EventKind::Remove(if is_dir { RemoveKind::Folder } else { RemoveKind::File }))
-                        .add_path(path.clone()),
+                    Event::new(EventKind::Remove(if is_dir {
+                        RemoveKind::Folder
+                    } else {
+                        RemoveKind::File
+                    }))
+                    .add_path(path.clone()),
                 );
                 if self.watches.contains_key(&path) {
                     remove.push(path.clone());
@@ -303,14 +351,18 @@ impl State {
             }
             if event.mask & IN_CLOSE_WRITE != 0 {
                 self.send(
-                    Event::new(EventKind::Access(AccessKind::Close(AccessMode::Write)))
-                        .add_path(path.clone()),
+                    Event::new(EventKind::Access(AccessKind::Close(
+                        AccessMode::Write,
+                    )))
+                    .add_path(path.clone()),
                 );
             }
             if event.mask & IN_ATTRIB != 0 {
                 self.send(
-                    Event::new(EventKind::Modify(ModifyKind::Metadata(MetadataKind::Any)))
-                        .add_path(path.clone()),
+                    Event::new(EventKind::Modify(ModifyKind::Metadata(
+                        MetadataKind::Any,
+                    )))
+                    .add_path(path.clone()),
                 );
             }
         }
@@ -332,13 +384,11 @@ pub struct InotifyWatcher {
 
 impl Watcher for InotifyWatcher {
     fn new<F: EventHandler>(event_handler: F, _config: Config) -> Result<Self> {
-        let mut fd = 0u32;
-        let errno = unsafe { host_inotify_init1(IN_NONBLOCK, &mut fd) };
-        if errno != 0 {
-            return Err(Error::io(io::Error::other(format!(
-                "inotify_init1 failed (errno {errno})"
-            ))));
-        }
+        let fd = linux_wasi::call(
+            SYS_INOTIFY_INIT1,
+            [IN_NONBLOCK | IN_CLOEXEC, 0, 0, 0, 0, 0],
+        )
+        .map_err(Error::io)? as u32;
         let state = Arc::new(Mutex::new(State {
             fd,
             file: unsafe { File::from_raw_fd(fd as i32) },
@@ -372,7 +422,11 @@ impl Watcher for InotifyWatcher {
         } else {
             std::env::current_dir().map_err(Error::io)?.join(path)
         };
-        self.state.lock().add_watch(path, recursive_mode == RecursiveMode::Recursive, true)
+        self.state.lock().add_watch(
+            path,
+            recursive_mode == RecursiveMode::Recursive,
+            true,
+        )
     }
 
     fn unwatch(&mut self, path: &Path) -> Result<()> {

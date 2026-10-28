@@ -36,6 +36,7 @@ use crate::{
     command::{CommandExecuted, CommandKind, InternalCommand, LapceCommand},
     config::LapceConfig,
     editor::EditorData,
+    i18n,
     keypress::{KeyPressFocus, condition::Condition},
     main_split::Editors,
     window_tab::CommonData,
@@ -507,7 +508,7 @@ impl FileExplorerData {
         let base_path = base_path_a.clone();
         let data = self.clone();
         let naming = self.naming;
-        menu = menu.entry(MenuItem::new("New File").action(move || {
+        menu = menu.entry(MenuItem::new(i18n::t("New File")).action(move || {
             let base_path_b = &base_path;
             let base_path = base_path.clone();
             data.read_dir_cb(base_path_b, move |was_read| {
@@ -531,10 +532,11 @@ impl FileExplorerData {
         let base_path = base_path_a.clone();
         let data = self.clone();
         let naming = self.naming;
-        menu = menu.entry(MenuItem::new("New Directory").action(move || {
-            let base_path_b = &base_path;
-            let base_path = base_path.clone();
-            data.read_dir_cb(base_path_b, move |was_read| {
+        menu =
+            menu.entry(MenuItem::new(i18n::t("New Directory")).action(move || {
+                let base_path_b = &base_path;
+                let base_path = base_path.clone();
+                data.read_dir_cb(base_path_b, move |was_read| {
                 if !was_read {
                     tracing::warn!(
                         "Failed to read directory, avoiding creating node in: {:?}",
@@ -550,7 +552,7 @@ impl FileExplorerData {
                     editor_needs_reset: true,
                 }));
             })
-        }));
+            }));
 
         menu = menu.separator();
 
@@ -558,9 +560,9 @@ impl FileExplorerData {
         if !common.workspace.kind.is_remote() {
             let path = path_a.clone();
             #[cfg(not(target_os = "macos"))]
-            let title = "Reveal in system file explorer";
+            let title = i18n::t("Reveal in system file explorer");
             #[cfg(target_os = "macos")]
-            let title = "Reveal in Finder";
+            let title = i18n::t("Reveal in Finder");
             menu = menu.entry(MenuItem::new(title).action(move || {
                 let path = path.parent().unwrap_or(&path);
                 if !path.exists() {
@@ -578,7 +580,7 @@ impl FileExplorerData {
 
         if !is_workspace {
             let path = path_a.clone();
-            menu = menu.entry(MenuItem::new("Rename").action(move || {
+            menu = menu.entry(MenuItem::new(i18n::t("Rename")).action(move || {
                 naming.set(Naming::Renaming(Renaming {
                     state: NamingState::Naming,
                     path: path.clone(),
@@ -587,22 +589,23 @@ impl FileExplorerData {
             }));
 
             let path = path_a.clone();
-            menu = menu.entry(MenuItem::new("Duplicate").action(move || {
-                naming.set(Naming::Duplicating(Duplicating {
-                    state: NamingState::Naming,
-                    path: path.clone(),
-                    editor_needs_reset: true,
+            menu =
+                menu.entry(MenuItem::new(i18n::t("Duplicate")).action(move || {
+                    naming.set(Naming::Duplicating(Duplicating {
+                        state: NamingState::Naming,
+                        path: path.clone(),
+                        editor_needs_reset: true,
+                    }));
                 }));
-            }));
 
             // TODO: it is common for shift+right click to make 'Move file to trash' an actual
             // Delete, which can be useful for large files.
             let path = path_a.clone();
             let proxy = common.proxy.clone();
             let trash_text = if is_dir {
-                "Move Directory to Trash"
+                i18n::t("Move Directory to Trash")
             } else {
-                "Move File to Trash"
+                i18n::t("Move File to Trash")
             };
             menu = menu.entry(MenuItem::new(trash_text).action(move || {
                 proxy.trash_path(path.clone(), |res| {
@@ -616,29 +619,31 @@ impl FileExplorerData {
         menu = menu.separator();
 
         let path = path_a.clone();
-        menu = menu.entry(MenuItem::new("Copy Path").action(move || {
+        menu = menu.entry(MenuItem::new(i18n::t("Copy Path")).action(move || {
             let mut clipboard = SystemClipboard::new();
             clipboard.put_string(path.to_string_lossy());
         }));
 
         let path = path_a.clone();
         let workspace = common.workspace.clone();
-        menu = menu.entry(MenuItem::new("Copy Relative Path").action(move || {
-            let relative_path = if let Some(workspace_path) = &workspace.path {
-                path.strip_prefix(workspace_path).unwrap_or(&path)
-            } else {
-                path.as_ref()
-            };
+        menu = menu.entry(MenuItem::new(i18n::t("Copy Relative Path")).action(
+            move || {
+                let relative_path = if let Some(workspace_path) = &workspace.path {
+                    path.strip_prefix(workspace_path).unwrap_or(&path)
+                } else {
+                    path.as_ref()
+                };
 
-            let mut clipboard = SystemClipboard::new();
-            clipboard.put_string(relative_path.to_string_lossy());
-        }));
+                let mut clipboard = SystemClipboard::new();
+                clipboard.put_string(relative_path.to_string_lossy());
+            },
+        ));
 
         menu = menu.separator();
 
         let path = path_a.clone();
         menu = menu.entry(
-            MenuItem::new("Select for Compare")
+            MenuItem::new(i18n::t("Select for Compare"))
                 .action(move || left_diff_path.set(Some(path.clone()))),
         );
 
@@ -646,22 +651,22 @@ impl FileExplorerData {
             let common = self.common.clone();
             let right_path = path_a.to_owned();
 
-            menu = menu.entry(MenuItem::new("Compare with Selected").action(
-                move || {
+            menu = menu.entry(
+                MenuItem::new(i18n::t("Compare with Selected")).action(move || {
                     common
                         .internal_command
                         .send(InternalCommand::OpenDiffFiles {
                             left_path: left_path.clone(),
                             right_path: right_path.clone(),
                         })
-                },
-            ))
+                }),
+            )
         }
 
         menu = menu.separator();
 
         let internal_command = common.internal_command;
-        menu = menu.entry(MenuItem::new("Refresh").action(move || {
+        menu = menu.entry(MenuItem::new(i18n::t("Refresh")).action(move || {
             internal_command.send(InternalCommand::ReloadFileExplorer);
         }));
 

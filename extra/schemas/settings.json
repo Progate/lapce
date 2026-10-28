@@ -168,6 +168,10 @@
                 "modal": {
                     "type": "boolean"
                 },
+                "language": {
+                    "type": "string",
+                    "enum": ["system", "en", "ja"]
+                },
                 "color-theme": {
                     "type": "string"
                 },
@@ -241,6 +245,12 @@
                 },
                 "autosave-interval": {
                     "type": "integer"
+                },
+                "autosave-on-focus-change": {
+                    "type": "boolean"
+                },
+                "word-based-suggestions": {
+                    "type": "boolean"
                 },
                 "enable-inlay-hints": {
                     "type": "boolean"
