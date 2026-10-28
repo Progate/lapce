@@ -3683,6 +3683,8 @@ fn window(window_data: WindowData) -> impl View {
     let window_focus = create_rw_signal(false);
     let ime_enabled = window_data.ime_enabled;
     let window_maximized = window_data.common.window_maximized;
+    let focus_window_tabs = window_data.window_tabs;
+    let focus_active = window_data.active;
 
     tab(active, items, key, |(_, window_tab_data)| {
         window_tab(window_tab_data)
@@ -3707,6 +3709,14 @@ fn window(window_data: WindowData) -> impl View {
     })
     .on_event_cont(EventListener::WindowGotFocus, move |_| {
         window_focus.set(true);
+    })
+    .on_event_cont(EventListener::WindowLostFocus, move |_| {
+        let active = focus_active.get_untracked();
+        let window_tab = focus_window_tabs
+            .with_untracked(|tabs| tabs.get(active).map(|(_, tab)| tab.clone()));
+        if let Some(window_tab) = window_tab {
+            window_tab.main_split.editors.save_on_focus_change();
+        }
     })
     .on_event_cont(EventListener::WindowMaximizeChanged, move |event| {
         if let Event::WindowMaximizeChanged(maximized) = event {

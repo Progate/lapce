@@ -246,6 +246,9 @@
                 "autosave-interval": {
                     "type": "integer"
                 },
+                "autosave-on-focus-change": {
+                    "type": "boolean"
+                },
                 "enable-inlay-hints": {
                     "type": "boolean"
                 },

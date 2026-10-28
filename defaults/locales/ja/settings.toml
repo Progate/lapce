@@ -125,6 +125,8 @@
 "Set the auto save delay (in milliseconds), Set to 0 to completely disable" = "自動保存までの時間（ミリ秒）を設定します。0 で自動保存しなくなります"
 "Format On Autosave" = "自動保存時にフォーマット"
 "Whether the document should be formatted when an autosave is triggered (required Format on Save)" = "自動保存のときにドキュメントをフォーマットします（「保存時にフォーマット」がオンのとき）"
+"Autosave On Focus Change" = "フォーカスが移ったら自動保存"
+"Save the document when the editor loses focus (another editor, a panel or another window)" = "エディタからフォーカスが移ったとき（ほかのエディタ・パネル・ほかのウィンドウ）にドキュメントを保存します"
 "Atomic Soft Tabs" = "ソフト タブをひとまとまりに"
 "If enabled the cursor treats leading soft tabs as if they are hard tabs." = "有効にすると、行頭のスペースのインデントを、タブ文字と同じく 1 つのまとまりとしてカーソルが移動します。"
 "Double Click" = "ダブルクリック"

@@ -2111,6 +2111,7 @@ fn editor_content(
             })
             .on_event_cont(EventListener::FocusLost, move |_| {
                 editor2.editor_view_focus_lost.notify();
+                e_data.get_untracked().save_on_focus_change();
             })
             .on_event_cont(EventListener::PointerDown, move |event| {
                 if let Event::PointerDown(pointer_event) = event {

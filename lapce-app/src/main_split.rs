@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -385,6 +385,21 @@ impl Editors {
         f: impl FnOnce(&im::HashMap<EditorId, EditorData>) -> O,
     ) -> O {
         self.0.with_untracked(f)
+    }
+
+    /// Saves every edited document once the window loses focus
+    /// (`editor.autosave-on-focus-change`). The focused editor does not get
+    /// its own focus-lost event in that case, so the window has to do it.
+    pub fn save_on_focus_change(&self) {
+        self.with_editors_untracked(|editors| {
+            let mut docs = HashSet::new();
+            for editor in editors.values() {
+                // Split views share one document; saving it once is enough
+                if docs.insert(Rc::as_ptr(&editor.doc())) {
+                    editor.save_on_focus_change();
+                }
+            }
+        });
     }
 }
 
