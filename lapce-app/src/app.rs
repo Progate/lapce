@@ -1,9 +1,11 @@
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::{
+    cell::RefCell,
+    collections::HashSet,
     io::{BufReader, IsTerminal, Read, Write},
     ops::Range,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Stdio,
     rc::Rc,
     sync::{
@@ -58,7 +60,7 @@ use lapce_core::{
 };
 use lapce_rpc::{
     RpcMessage,
-    core::{CoreMessage, CoreNotification},
+    core::{CoreMessage, CoreNotification, CoreRequest, CoreResponse},
     file::PathObject,
 };
 use lsp_types::{CompletionItemKind, MessageType, ShowMessageParams};
@@ -148,6 +150,31 @@ struct Cli {
     #[cfg(target_os = "wasi")]
     #[clap(long, action)]
     read_only: bool,
+
+    /// Listen for requests from other `lapce` commands (such as `--save-all`) at this socket
+    /// path instead of the shared one. Always starts a new instance, so that each instance
+    /// can be addressed on its own (like `nvim --listen`)
+    #[clap(long, value_name = "PATH")]
+    listen: Option<PathBuf>,
+
+    /// The running Lapce to send `--save-all` to: the socket path it listens at (`--listen`).
+    /// Without it, the instance listening at the shared socket
+    #[clap(long, value_name = "PATH")]
+    server: Option<PathBuf>,
+
+    /// Ask the running Lapce to write every modified document to its file, wait until the
+    /// writes are done, and exit. Exits with 1 when a file could not be written, and with 2
+    /// when no Lapce answers
+    #[clap(long, action)]
+    save_all: bool,
+}
+
+/// What a request on the local socket asks the app to do (→ `serve_local_socket_client`)
+#[derive(Clone)]
+enum RemoteCommand {
+    OpenPaths(Vec<PathObject>),
+    /// Save every modified document, then send the files that could not be written
+    SaveAll(SyncSender<Vec<PathBuf>>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,6 +226,54 @@ impl AppData {
             return window.active_window_tab();
         }
         None
+    }
+
+    /// Writes every modified document of every window to its file (→ `CoreRequest::SaveAll`),
+    /// and calls `on_done` with the files that could not be written once all the writes are
+    /// done. Nothing is formatted: the request comes from outside, which only wants the files
+    /// to hold what the documents show.
+    pub fn save_all_documents(&self, on_done: impl FnOnce(Vec<PathBuf>) + 'static) {
+        let mut paths = HashSet::new();
+        let mut docs = Vec::new();
+        for (_, window) in self.windows.get_untracked() {
+            for (_, window_tab) in window.window_tabs.get_untracked() {
+                for (path, doc) in window_tab.main_split.docs.get_untracked() {
+                    if !doc.is_pristine() && paths.insert(path.clone()) {
+                        docs.push((path, doc));
+                    }
+                }
+            }
+        }
+        if docs.is_empty() {
+            on_done(Vec::new());
+            return;
+        }
+        // The writes answer one by one, so count down and answer once with all the failures
+        let pending = Rc::new(RefCell::new((docs.len(), Vec::new(), Some(on_done))));
+        for (path, doc) in docs {
+            let pending = pending.clone();
+            doc.save_reporting(move |saved| {
+                let done = {
+                    let mut pending = pending.borrow_mut();
+                    pending.0 -= 1;
+                    if let Err(err) = saved {
+                        tracing::error!("failed to save {path:?}: {err}");
+                        pending.1.push(path);
+                    }
+                    if pending.0 == 0 {
+                        pending
+                            .2
+                            .take()
+                            .map(|on_done| (on_done, std::mem::take(&mut pending.1)))
+                    } else {
+                        None
+                    }
+                };
+                if let Some((on_done, failed)) = done {
+                    on_done(failed);
+                }
+            });
+        }
     }
 
     fn active_window(&self) -> Option<WindowData> {
@@ -3758,6 +3833,11 @@ pub fn launch() {
         lapce_core::read_only::enable();
     }
 
+    if cli.save_all {
+        std::process::exit(remote_save_all(cli.server.as_deref()));
+    }
+    let listen_path = cli.listen.clone().or_else(Directory::local_socket);
+
     if !cli.wait {
         logging::panic_hook();
     }
@@ -3848,7 +3928,7 @@ pub fn launch() {
 
     // If the cli is not requesting a new window, and we're not developing a plugin, we try to open
     // in the existing Lapce process
-    if !cli.new {
+    if !cli.new && cli.listen.is_none() {
         match get_socket() {
             Ok(socket) => {
                 if let Err(e) = try_open_in_existing_process(socket, &cli.paths) {
@@ -4056,23 +4136,31 @@ pub fn launch() {
             .unwrap();
     }
 
-    {
+    if let Some(listen_path) = listen_path {
         let (tx, rx) = sync_channel(1);
         let notification = create_signal_from_channel(rx);
         let app_data = app_data.clone();
-        create_effect(move |_| {
-            if let Some(CoreNotification::OpenPaths { paths }) = notification.get() {
+        create_effect(move |_| match notification.get() {
+            Some(RemoteCommand::OpenPaths(paths)) => {
                 if let Some(window_tab) = app_data.active_window_tab() {
                     window_tab.open_paths(&paths);
                     // focus window after open doc
                     floem::action::focus_window();
                 }
             }
+            Some(RemoteCommand::SaveAll(reply)) => {
+                app_data.save_all_documents(move |failed| {
+                    if let Err(err) = reply.send(failed) {
+                        tracing::error!("{:?}", err);
+                    }
+                });
+            }
+            None => {}
         });
         std::thread::Builder::new()
             .name("ListenLocalSocket".to_owned())
             .spawn(move || {
-                if let Err(err) = listen_local_socket(tx) {
+                if let Err(err) = listen_local_socket(&listen_path, tx) {
                     tracing::error!("{:?}", err);
                 }
             })
@@ -4165,38 +4253,34 @@ pub fn load_shell_env() {
         })
 }
 
-/// WASI（preview1）に Unix ドメインソケットは無い。既に開いている Lapce へは繋がず、
-/// 毎回自分で窓を開く
+/// A connection to a running Lapce's local socket
+#[cfg(not(target_os = "wasi"))]
+type LocalSocketStream = interprocess::local_socket::LocalSocketStream;
+/// A connection to a running Lapce's local socket. WASI's std has no Unix domain sockets, but
+/// BrowserOS takes Linux's socket calls (→ lapce_proxy::local_socket_wasi)
 #[cfg(target_os = "wasi")]
-pub fn get_socket() -> Result<std::convert::Infallible> {
-    Err(anyhow!("local sockets are not available on WASI"))
-}
-
-#[cfg(target_os = "wasi")]
-pub fn try_open_in_existing_process(
-    socket: std::convert::Infallible,
-    _paths: &[PathObject],
-) -> Result<()> {
-    match socket {}
-}
-
-#[cfg(target_os = "wasi")]
-fn listen_local_socket(_tx: SyncSender<CoreNotification>) -> Result<()> {
-    Err(anyhow!("local sockets are not available on WASI"))
-}
+type LocalSocketStream = std::fs::File;
 
 #[cfg(not(target_os = "wasi"))]
-pub fn get_socket() -> Result<interprocess::local_socket::LocalSocketStream> {
+fn connect_local_socket(path: &Path) -> Result<LocalSocketStream> {
+    Ok(interprocess::local_socket::LocalSocketStream::connect(
+        path,
+    )?)
+}
+
+#[cfg(target_os = "wasi")]
+fn connect_local_socket(path: &Path) -> Result<LocalSocketStream> {
+    Ok(lapce_proxy::local_socket_wasi::connect(path)?)
+}
+
+pub fn get_socket() -> Result<LocalSocketStream> {
     let local_socket = Directory::local_socket()
         .ok_or_else(|| anyhow!("can't get local socket folder"))?;
-    let socket =
-        interprocess::local_socket::LocalSocketStream::connect(local_socket)?;
-    Ok(socket)
+    connect_local_socket(&local_socket)
 }
 
-#[cfg(not(target_os = "wasi"))]
 pub fn try_open_in_existing_process(
-    mut socket: interprocess::local_socket::LocalSocketStream,
+    mut socket: LocalSocketStream,
     paths: &[PathObject],
 ) -> Result<()> {
     let msg: CoreMessage = RpcMessage::Notification(CoreNotification::OpenPaths {
@@ -4223,28 +4307,117 @@ pub fn try_open_in_existing_process(
     Ok(())
 }
 
-#[cfg(not(target_os = "wasi"))]
-fn listen_local_socket(tx: SyncSender<CoreNotification>) -> Result<()> {
-    let local_socket = Directory::local_socket()
-        .ok_or_else(|| anyhow!("can't get local socket folder"))?;
+/// `lapce --save-all`: asks the Lapce listening at `server` (the shared socket when `None`) to
+/// save every modified document, and waits for the answer, which comes once the files are
+/// written. Returns the exit status.
+fn remote_save_all(server: Option<&Path>) -> i32 {
+    let Some(path) = server
+        .map(Path::to_path_buf)
+        .or_else(Directory::local_socket)
+    else {
+        eprintln!("lapce: can't get the local socket folder");
+        return 2;
+    };
+    let mut socket = match connect_local_socket(&path) {
+        Ok(socket) => socket,
+        Err(err) => {
+            eprintln!("lapce: no Lapce is listening at {}: {err}", path.display());
+            return 2;
+        }
+    };
+    let request: CoreMessage = RpcMessage::Request(0, CoreRequest::SaveAll {});
+    if let Err(err) = lapce_rpc::stdio::write_msg(&mut socket, request) {
+        eprintln!("lapce: failed to ask {} to save: {err}", path.display());
+        return 2;
+    }
+    let answer: Option<CoreMessage> =
+        lapce_rpc::stdio::read_msg(&mut BufReader::new(socket)).unwrap_or(None);
+    match answer {
+        Some(RpcMessage::Response(_, CoreResponse::SaveAll { failed })) => {
+            if failed.is_empty() {
+                return 0;
+            }
+            for path in failed {
+                eprintln!("lapce: failed to save {}", path.display());
+            }
+            1
+        }
+        _ => {
+            eprintln!("lapce: {} did not answer", path.display());
+            2
+        }
+    }
+}
+
+/// Makes `local_socket` ready to bind: its folder exists (a `--listen` path may point into one
+/// that does not yet), and the socket a previous instance left behind is gone (binding to it fails)
+fn prepare_local_socket(local_socket: &Path) -> Result<()> {
+    if let Some(parent) = local_socket.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     if local_socket.exists() {
-        if let Err(err) = std::fs::remove_file(&local_socket) {
+        if let Err(err) = std::fs::remove_file(local_socket) {
             tracing::error!("{:?}", err);
         }
     }
+    Ok(())
+}
+
+#[cfg(not(target_os = "wasi"))]
+fn listen_local_socket(
+    local_socket: &Path,
+    tx: SyncSender<RemoteCommand>,
+) -> Result<()> {
+    prepare_local_socket(local_socket)?;
     let socket =
         interprocess::local_socket::LocalSocketListener::bind(local_socket)?;
 
     for stream in socket.incoming().flatten() {
         let tx = tx.clone();
-        std::thread::spawn(move || -> Result<()> {
-            let mut reader = BufReader::new(stream);
-            loop {
-                let msg: Option<CoreMessage> =
-                    lapce_rpc::stdio::read_msg(&mut reader)?;
+        std::thread::spawn(move || serve_local_socket_client(stream, tx));
+    }
+    Ok(())
+}
 
-                if let Some(RpcMessage::Notification(msg)) = msg {
-                    tx.send(msg)?;
+#[cfg(target_os = "wasi")]
+fn listen_local_socket(
+    local_socket: &Path,
+    tx: SyncSender<RemoteCommand>,
+) -> Result<()> {
+    prepare_local_socket(local_socket)?;
+    let socket =
+        lapce_proxy::local_socket_wasi::LocalSocketListener::bind(local_socket)?;
+
+    for stream in socket.incoming().flatten() {
+        let tx = tx.clone();
+        std::thread::spawn(move || serve_local_socket_client(stream, tx));
+    }
+    Ok(())
+}
+
+/// Answers the requests of one client of the local socket until it hangs up
+fn serve_local_socket_client(
+    stream: LocalSocketStream,
+    tx: SyncSender<RemoteCommand>,
+) -> Result<()> {
+    let mut reader = BufReader::new(stream);
+    loop {
+        let msg: Option<CoreMessage> = lapce_rpc::stdio::read_msg(&mut reader)?;
+        match msg {
+            Some(RpcMessage::Request(id, CoreRequest::SaveAll {})) => {
+                let (reply, failed) = sync_channel(1);
+                tx.send(RemoteCommand::SaveAll(reply))?;
+                let failed = failed.recv()?;
+                let response: CoreMessage =
+                    RpcMessage::Response(id, CoreResponse::SaveAll { failed });
+                lapce_rpc::stdio::write_msg(reader.get_mut(), response)?;
+            }
+            msg => {
+                if let Some(RpcMessage::Notification(
+                    CoreNotification::OpenPaths { paths },
+                )) = msg
+                {
+                    tx.send(RemoteCommand::OpenPaths(paths))?;
                 } else {
                     trace!(TraceLevel::ERROR, "Unhandled message: {msg:?}");
                 }
@@ -4257,9 +4430,8 @@ fn listen_local_socket(tx: SyncSender<CoreNotification>) -> Result<()> {
                     tracing::error!("{:?}", err);
                 }
             }
-        });
+        }
     }
-    Ok(())
 }
 
 pub fn window_menu(

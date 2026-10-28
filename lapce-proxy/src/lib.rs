@@ -11,6 +11,8 @@ mod git_wasi;
 mod inotify_wasi;
 #[cfg(target_os = "wasi")]
 mod linux_wasi;
+#[cfg(target_os = "wasi")]
+pub mod local_socket_wasi;
 pub mod plugin;
 #[cfg(not(target_os = "wasi"))]
 pub mod terminal;
