@@ -74,9 +74,13 @@ pub struct CompletionData {
     config: ReadSignal<Arc<LapceConfig>>,
     /// The open documents, for word based suggestions (set once the main split exists)
     docs: Option<RwSignal<im::HashMap<PathBuf, Rc<Doc>>>>,
-    /// The words of each open document with the revision they were counted at, so that a keystroke
-    /// only counts the documents that changed since the last request
+    /// The words of each open document with the revision they were counted at, so that a new
+    /// completion only counts the documents that changed since the last one
     word_cache: Rc<RefCell<HashMap<PathBuf, (u64, Rc<HashMap<String, usize>>)>>>,
+    /// The words of the open documents counted when the completion with this request id started.
+    /// Typing only changes the word being typed, so the keystrokes of one completion reuse them
+    /// instead of counting the document again for every new input
+    session_words: Rc<RefCell<Option<(usize, Rc<HashMap<String, usize>>)>>>,
 }
 
 /// The provider id of word based suggestions. They come from the open documents, not from a plugin,
@@ -106,6 +110,7 @@ impl CompletionData {
             config,
             docs: None,
             word_cache: Rc::new(RefCell::new(HashMap::new())),
+            session_words: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -145,9 +150,20 @@ impl CompletionData {
             .collect();
         // Several providers answer the same request (every plugin, and the words of the open
         // documents), so add to what has arrived instead of replacing it. A word that a plugin
-        // also suggests is dropped, since the plugin's item knows more about it.
-        let labels: HashSet<&str> =
-            items.iter().map(|i| i.item.label.as_str()).collect();
+        // also suggests is dropped, since the plugin's item knows more about it. A plugin's label
+        // may decorate the name (rust-analyzer shows `foo(…)`), so the text the item filters and
+        // inserts by counts as the name too.
+        let labels: HashSet<&str> = items
+            .iter()
+            .flat_map(|i| {
+                [
+                    Some(i.item.label.as_str()),
+                    i.item.filter_text.as_deref(),
+                    i.item.insert_text.as_deref(),
+                ]
+            })
+            .flatten()
+            .collect();
         let mut merged: im::Vector<ScoredCompletionItem> = self
             .input_items
             .get(input)
@@ -192,6 +208,47 @@ impl CompletionData {
         else {
             return im::Vector::new();
         };
+        let counts = self.session_word_counts(path, docs);
+        let mut words: Vec<(String, usize)> = counts
+            .iter()
+            .filter(|(word, count)| **count > 0 && may_match(word, &self.input))
+            .map(|(word, count)| (word.clone(), *count))
+            .collect();
+        if words.len() > MAX_WORD_COMPLETION_ITEMS {
+            words.sort_by(|(a, a_count), (b, b_count)| {
+                b_count.cmp(a_count).then_with(|| a.cmp(b))
+            });
+            words.truncate(MAX_WORD_COMPLETION_ITEMS);
+        }
+        words
+            .into_iter()
+            .map(|(word, _)| ScoredCompletionItem {
+                item: CompletionItem {
+                    label: word,
+                    kind: Some(CompletionItemKind::TEXT),
+                    ..Default::default()
+                },
+                plugin_id: WORD_COMPLETION_PLUGIN_ID,
+                score: 0,
+                label_score: 0,
+                indices: Vec::new(),
+            })
+            .collect()
+    }
+
+    /// The words of the open documents in the same language as `path` with how often they appear,
+    /// counted once per completion (request id). The word being typed when the completion started
+    /// is left out once, so it is suggested only when it also appears somewhere else.
+    fn session_word_counts(
+        &self,
+        path: &PathBuf,
+        docs: RwSignal<im::HashMap<PathBuf, Rc<Doc>>>,
+    ) -> Rc<HashMap<String, usize>> {
+        if let Some((request_id, counts)) = &*self.session_words.borrow() {
+            if *request_id == self.request_id {
+                return counts.clone();
+            }
+        }
         let docs = docs.get_untracked();
         let language = docs
             .get(path)
@@ -226,30 +283,9 @@ impl CompletionData {
         if let Some(count) = counts.get_mut(&self.input) {
             *count -= 1;
         }
-        let mut words: Vec<(String, usize)> = counts
-            .into_iter()
-            .filter(|(word, count)| *count > 0 && may_match(word, &self.input))
-            .collect();
-        if words.len() > MAX_WORD_COMPLETION_ITEMS {
-            words.sort_by(|(a, a_count), (b, b_count)| {
-                b_count.cmp(a_count).then_with(|| a.cmp(b))
-            });
-            words.truncate(MAX_WORD_COMPLETION_ITEMS);
-        }
-        words
-            .into_iter()
-            .map(|(word, _)| ScoredCompletionItem {
-                item: CompletionItem {
-                    label: word,
-                    kind: Some(CompletionItemKind::TEXT),
-                    ..Default::default()
-                },
-                plugin_id: WORD_COMPLETION_PLUGIN_ID,
-                score: 0,
-                label_score: 0,
-                indices: Vec::new(),
-            })
-            .collect()
+        let counts = Rc::new(counts);
+        *self.session_words.borrow_mut() = Some((self.request_id, counts.clone()));
+        counts
     }
 
     /// Close the completion, clearing all the data.
