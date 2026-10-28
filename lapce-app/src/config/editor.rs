@@ -189,6 +189,10 @@ pub struct EditorConfig {
     #[field_names(desc = "If the editor should display inline completions")]
     pub enable_inline_completion: bool,
     #[field_names(
+        desc = "Suggest the words of the open documents in the same language as completions"
+    )]
+    pub word_based_suggestions: bool,
+    #[field_names(
         desc = "Set completion lens font family. If empty, it uses the inlay hint font family."
     )]
     pub completion_lens_font_family: String,

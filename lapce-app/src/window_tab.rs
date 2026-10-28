@@ -395,6 +395,11 @@ impl WindowTabData {
         });
 
         let main_split = MainSplitData::new(cx, common.clone());
+        // Word based suggestions read the open documents, which the main split keeps
+        let docs = main_split.docs;
+        common
+            .completion
+            .update(|completion| completion.set_docs(docs));
         let code_action =
             cx.create_rw_signal(CodeActionData::new(cx, common.clone()));
         let source_control =

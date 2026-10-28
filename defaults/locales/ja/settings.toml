@@ -107,6 +107,8 @@
 "If the editor should display the completion item as phantom text" = "補完候補を薄い文字（ゴースト テキスト）で表示します"
 "Enable Inline Completion" = "インライン補完を有効にする"
 "If the editor should display inline completions" = "インライン補完を表示します"
+"Word Based Suggestions" = "単語の候補"
+"Suggest the words of the open documents in the same language as completions" = "開いている同じ言語のドキュメントにある単語を、補完の候補に出します"
 "Completion Lens Font Family" = "Completion Lens のフォント ファミリ"
 "Set completion lens font family. If empty, it uses the inlay hint font family." = "Completion Lens のフォント ファミリを設定します。空のときはインレイ ヒントのフォント ファミリを使います。"
 "Completion Lens Font Size" = "Completion Lens のフォント サイズ"
