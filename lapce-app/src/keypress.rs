@@ -39,17 +39,6 @@ const DEFAULT_KEYMAPS_MACOS: &str =
 const DEFAULT_KEYMAPS_NONMACOS: &str =
     include_str!("../../defaults/keymaps-nonmacos.toml");
 
-/// macOS の割り当て（⌘C・⌘V・⌘Z など ⌘ で組むもの）を使うか。
-///
-/// BrowserOS 版は Linux として組まれるが、学習者の手元は Mac のことが多い。ブラウザーは ⌘ をそのまま Meta として渡すので、
-/// Linux の割り当て（Ctrl で組むもの）のままでは ⌘C・⌘V・⌘Z が何にも当たらない。ホストのページが自分の OS を
-/// `BROWSEROS_HOST_OS`（`macos`・`windows`・`linux`）で渡すので、`macos` なら macOS 版と同じ割り当てにする
-fn uses_macos_keymaps() -> bool {
-    std::env::consts::OS == "macos"
-        || (cfg!(target_os = "wasi")
-            && std::env::var("BROWSEROS_HOST_OS").as_deref() == Ok("macos"))
-}
-
 pub trait KeyPressFocus: std::fmt::Debug {
     fn get_mode(&self) -> Mode;
 
@@ -588,7 +577,7 @@ impl KeyPressData {
             trace!(TraceLevel::ERROR, "Failed to load common defaults: {err}");
         }
 
-        let os_keymaps = if uses_macos_keymaps() {
+        let os_keymaps = if std::env::consts::OS == "macos" {
             DEFAULT_KEYMAPS_MACOS
         } else {
             DEFAULT_KEYMAPS_NONMACOS
