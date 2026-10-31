@@ -60,8 +60,11 @@ impl PanelKind {
         }
         match self {
             // 読み取り専用で開いたときは、書き換えられる口（端末・コミット）を出さない（→ lapce_core::read_only）
-            PanelKind::Terminal | PanelKind::SourceControl => {
+            PanelKind::Terminal => !lapce_core::read_only::is_enabled(),
+            // 演習の画面に埋め込むときは、ファイルの一覧だけを並べるために外せる（→ lapce_core::embed）
+            PanelKind::SourceControl => {
                 !lapce_core::read_only::is_enabled()
+                    && !lapce_core::embed::hides_source_control()
             }
             PanelKind::FileExplorer | PanelKind::Search => true,
             PanelKind::Plugin

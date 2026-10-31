@@ -708,6 +708,25 @@ impl View for TerminalView {
             );
         }
 
+        /*
+         * BrowserOS 版では、焦点のある端末のカーソルの下を IME の候補を出す場所として windowserver へ言う。
+         * 言わないと、ホストの隠し入力は前に焦点を持っていたエディターの場所（無ければ画面の左上）に残り、
+         * 日本語を変換するときの候補が端末から離れた所に出る
+         */
+        if cfg!(target_os = "wasi") && self.is_focused && mode == Mode::Terminal {
+            let origin = self.id.layout_rect().origin();
+            let x = content.cursor.point.column.0 as f64 * char_width;
+            let y = (content.cursor.point.line.0 as f64
+                + content.display_offset as f64
+                + 1.0)
+                * line_height;
+            floem::action::set_ime_allowed(true);
+            floem::action::set_ime_cursor_area(
+                Point::new(origin.x + x, origin.y + y),
+                Size::new(800.0, 600.0),
+            );
+        }
+
         self.paint_content(cx, content, line_height, char_size, &config);
         // if data.find.visual {
         //     if let Some(search_string) = data.find.search_string.as_ref() {

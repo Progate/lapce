@@ -86,6 +86,8 @@
 # エクスプローラー
 "Open Editors" = "開いているエディター"
 "File Explorer" = "エクスプローラー"
+"No file is open" = "開いているファイルはありません"
+"Open the File Explorer" = "エクスプローラーを開く"
 "Group {}" = "グループ {}"
 "New Directory" = "新しいフォルダー"
 "Reveal in system file explorer" = "ファイル エクスプローラーで表示"
