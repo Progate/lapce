@@ -101,7 +101,10 @@ use crate::{
         PaletteStatus,
         item::{PaletteItem, PaletteItemContent},
     },
-    panel::{position::PanelContainerPosition, view::panel_container_view},
+    panel::{
+        kind::PanelKind, position::PanelContainerPosition,
+        view::panel_container_view,
+    },
     plugin::{PluginData, plugin_info_view},
     settings::{settings_view, theme_color_settings_view},
     status::status,
@@ -150,6 +153,23 @@ struct Cli {
     #[cfg(target_os = "wasi")]
     #[clap(long, action)]
     read_only: bool,
+
+    /// Don't show the title bar (command palette and navigation) at the top of the window
+    /// (BrowserOS only. → lapce_core::embed)
+    #[cfg(target_os = "wasi")]
+    #[clap(long, action)]
+    no_title_bar: bool,
+
+    /// Don't show the Open Editors section above the file explorer
+    /// (BrowserOS only. → lapce_core::embed)
+    #[cfg(target_os = "wasi")]
+    #[clap(long, action)]
+    no_open_editors: bool,
+
+    /// Don't show the source control panel (BrowserOS only. → lapce_core::embed)
+    #[cfg(target_os = "wasi")]
+    #[clap(long, action)]
+    no_source_control: bool,
 
     /// Listen for requests from other `lapce` commands (such as `--save-all`) at this socket
     /// path instead of the shared one. Always starts a new instance, so that each instance
@@ -2126,12 +2146,16 @@ fn main_split(window_tab_data: Rc<WindowTabData>) -> impl View {
     let plugin = window_tab_data.plugin.clone();
     let dragging: RwSignal<Option<(RwSignal<usize>, EditorTabId)>> =
         create_rw_signal(None);
-    split_list(
-        root_split,
-        window_tab_data.clone(),
-        plugin.clone(),
-        dragging,
-    )
+    stack((
+        split_list(
+            root_split,
+            window_tab_data.clone(),
+            plugin.clone(),
+            dragging,
+        )
+        .style(|s| s.size_full()),
+        empty_editor_view(window_tab_data.clone()),
+    ))
     .style(move |s| {
         let config = config.get();
         let is_hidden = panel.panel_bottom_maximized(true)
@@ -2144,6 +2168,53 @@ fn main_split(window_tab_data: Rc<WindowTabData>) -> impl View {
             .flex_basis(0.0)
     })
     .debug_name("Main Split")
+}
+
+/// エディターを 1 つも開いていないときの案内（BrowserOS 版だけ）。
+///
+/// 演習の画面では、学習者がタブをすべて閉じたり、ファイルの一覧を畳んだりすると、何も無い面だけが残って戻り方が分からない。
+/// 何を開けばよいかの案内と、ファイルの一覧を開くボタンを真ん中に置く
+fn empty_editor_view(window_tab_data: Rc<WindowTabData>) -> impl View {
+    let config = window_tab_data.common.config;
+    let editor_tabs = window_tab_data.main_split.editor_tabs;
+    let open_explorer = {
+        let window_tab_data = window_tab_data.clone();
+        move || window_tab_data.show_panel(PanelKind::FileExplorer)
+    };
+    stack((
+        text(i18n::t("No file is open")).style(move |s| {
+            s.selectable(false)
+                .color(config.get().color(LapceColor::EDITOR_DIM))
+        }),
+        text(i18n::t("Open the File Explorer"))
+            .on_click_stop(move |_| open_explorer())
+            .style(move |s| {
+                let config = config.get();
+                s.selectable(false)
+                    .margin_top(12.0)
+                    .padding_horiz(12.0)
+                    .padding_vert(6.0)
+                    .border(1.0)
+                    .border_radius(6.0)
+                    .border_color(config.color(LapceColor::LAPCE_BORDER))
+                    .color(config.color(LapceColor::EDITOR_FOREGROUND))
+                    .hover(|s| {
+                        s.cursor(CursorStyle::Pointer).background(
+                            config.color(LapceColor::PANEL_HOVERED_BACKGROUND),
+                        )
+                    })
+            }),
+    ))
+    .style(move |s| {
+        let has_editor = editor_tabs.with(|tabs| !tabs.is_empty());
+        s.absolute()
+            .size_full()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .apply_if(!cfg!(target_os = "wasi") || has_editor, |s| s.hide())
+    })
+    .debug_name("Empty Editor")
 }
 
 pub fn not_clickable_icon<S: std::fmt::Display + 'static>(
@@ -3401,7 +3472,10 @@ fn window_tab(window_tab_data: Rc<WindowTabData>) -> impl View {
 
     let view = stack((
         stack((
-            title(window_tab_data.clone()),
+            // 演習の画面に埋め込むときは帯ごと外す（→ lapce_core::embed）
+            title(window_tab_data.clone()).style(|s| {
+                s.apply_if(lapce_core::embed::hides_title_bar(), |s| s.hide())
+            }),
             workbench(window_tab_data.clone()),
             status(
                 window_tab_data.clone(),
@@ -3832,6 +3906,12 @@ pub fn launch() {
     if cli.read_only {
         lapce_core::read_only::enable();
     }
+    #[cfg(target_os = "wasi")]
+    lapce_core::embed::set(lapce_core::embed::Embed {
+        no_title_bar: cli.no_title_bar,
+        no_open_editors: cli.no_open_editors,
+        no_source_control: cli.no_source_control,
+    });
 
     if cli.save_all {
         std::process::exit(remote_save_all(cli.server.as_deref()));
