@@ -58,6 +58,7 @@ use crate::terminal::{Terminal, TerminalSender};
 use crate::terminal_wasi::{TerminalMessage, TerminalSender};
 use crate::{
     buffer::{Buffer, get_mod_time, load_file},
+    exclude::Exclude,
     plugin::{PluginCatalogRpcHandler, catalog::PluginCatalog},
     watcher::{FileWatcher, Notify, WatchToken},
 };
@@ -571,7 +572,11 @@ impl ProxyHandler for Dispatcher {
                             &WORKER_ID,
                             workspace
                                 .iter()
-                                .flat_map(|w| ignore::Walk::new(w).flatten())
+                                .flat_map(|w| {
+                                    let mut walker = ignore::WalkBuilder::new(w);
+                                    exclude_from_walk(&mut walker);
+                                    walker.build().flatten()
+                                })
                                 .chain(
                                     buffers.iter().flat_map(|p| {
                                         ignore::Walk::new(p).flatten()
@@ -877,20 +882,13 @@ impl ProxyHandler for Dispatcher {
                                 .add("!.git/")
                                 .map(|git_folder| git_folder.build());
 
-                        let walker = match git_folder {
-                            Ok(Ok(git_folder)) => {
-                                ignore::WalkBuilder::new(&workspace)
-                                    .hidden(false)
-                                    .parents(false)
-                                    .require_git(false)
-                                    .overrides(git_folder)
-                                    .build()
-                            }
-                            _ => ignore::WalkBuilder::new(&workspace)
-                                .parents(false)
-                                .require_git(false)
-                                .build(),
-                        };
+                        let mut walker = ignore::WalkBuilder::new(&workspace);
+                        walker.parents(false).require_git(false);
+                        if let Ok(Ok(git_folder)) = git_folder {
+                            walker.hidden(false).overrides(git_folder);
+                        }
+                        exclude_from_walk(&mut walker);
+                        let walker = walker.build();
 
                         let mut items = Vec::new();
                         for path in walker.flatten() {
@@ -924,6 +922,7 @@ impl ProxyHandler for Dispatcher {
             ReadDir { path } => {
                 let proxy_rpc = self.proxy_rpc.clone();
                 thread::spawn(move || {
+                    let exclude = Exclude::load();
                     let result = fs::read_dir(path)
                         .map(|entries| {
                             let mut items = entries
@@ -939,6 +938,11 @@ impl ProxyHandler for Dispatcher {
                                             children_open_count: 0,
                                         })
                                         .ok()
+                                })
+                                .filter(|item| {
+                                    !exclude.as_ref().is_some_and(|exclude| {
+                                        exclude.is_excluded(&item.path, item.is_dir)
+                                    })
                                 })
                                 .collect::<Vec<FileNodeItem>>();
 
@@ -1479,6 +1483,16 @@ pub struct DiffHunk {
     pub new_start: u32,
     pub new_lines: u32,
     pub header: String,
+}
+
+/// 見せないもの（→ exclude）を、フォルダをたどる道から外す。外したディレクトリの中へは入らない
+fn exclude_from_walk(walker: &mut ignore::WalkBuilder) {
+    if let Some(exclude) = Exclude::load() {
+        walker.filter_entry(move |entry| {
+            let is_dir = entry.file_type().is_some_and(|t| t.is_dir());
+            !exclude.is_excluded(entry.path(), is_dir)
+        });
+    }
 }
 
 fn search_in_path(

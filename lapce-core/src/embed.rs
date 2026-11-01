@@ -5,11 +5,18 @@
 //! 決めるのは起動の引数で、板の並び（`PanelKind::is_available`）を組むより先に読まれるので、`read_only` と同じく
 //! 窓を開く前に 1 度だけ決める
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 static NO_TITLE_BAR: AtomicBool = AtomicBool::new(false);
 static NO_OPEN_EDITORS: AtomicBool = AtomicBool::new(false);
 static NO_SOURCE_CONTROL: AtomicBool = AtomicBool::new(false);
+static EXCLUDE_FILE: OnceLock<PathBuf> = OnceLock::new();
 
 /// 埋め込むときに外すもの
 #[derive(Debug, Clone, Copy, Default)]
@@ -42,4 +49,15 @@ pub fn hides_open_editors() -> bool {
 /// ソース管理の板を出さないか
 pub fn hides_source_control() -> bool {
     NO_SOURCE_CONTROL.load(Ordering::Relaxed)
+}
+
+/// ファイルの一覧・ファイルの検索・全体の検索から外すものを書いたファイル（`--exclude-file`）を決める。
+/// 窓を開く前に 1 度だけ呼ぶ。BrowserOS 版の proxy は同じプロセスで動くので、ここに置けば proxy から読める
+pub fn set_exclude_file(path: PathBuf) {
+    let _ = EXCLUDE_FILE.set(path);
+}
+
+/// 外すものを書いたファイル。中身は gitignore と同じ書き方で、場所を含む行は根から当てる（→ lapce_proxy::exclude）
+pub fn exclude_file() -> Option<&'static Path> {
+    EXCLUDE_FILE.get().map(PathBuf::as_path)
 }

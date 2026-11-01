@@ -3,6 +3,7 @@
 pub mod buffer;
 pub mod cli;
 pub mod dispatch;
+pub mod exclude;
 #[cfg(not(target_os = "wasi"))]
 mod git;
 #[cfg(target_os = "wasi")]

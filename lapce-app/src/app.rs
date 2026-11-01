@@ -171,6 +171,12 @@ struct Cli {
     #[clap(long, action)]
     no_source_control: bool,
 
+    /// Hide the files matched by this gitignore-style file from the file explorer, file search
+    /// and global search (BrowserOS only. → lapce_proxy::exclude)
+    #[cfg(target_os = "wasi")]
+    #[clap(long, value_name = "PATH")]
+    exclude_file: Option<PathBuf>,
+
     /// Listen for requests from other `lapce` commands (such as `--save-all`) at this socket
     /// path instead of the shared one. Always starts a new instance, so that each instance
     /// can be addressed on its own (like `nvim --listen`)
@@ -3912,6 +3918,10 @@ pub fn launch() {
         no_open_editors: cli.no_open_editors,
         no_source_control: cli.no_source_control,
     });
+    #[cfg(target_os = "wasi")]
+    if let Some(path) = cli.exclude_file.clone() {
+        lapce_core::embed::set_exclude_file(path);
+    }
 
     if cli.save_all {
         std::process::exit(remote_save_all(cli.server.as_deref()));
