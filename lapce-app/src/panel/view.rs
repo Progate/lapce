@@ -646,7 +646,9 @@ fn panel_picker(
                     p.get(&position)
                         // BrowserOS 版では、板が 1 つだけなら切り替えるものが無いので並びごと隠す
                         // （ソース管理を外してファイルの一覧だけにしたとき → lapce_core::embed）
-                        .map(|p| p.len() <= usize::from(cfg!(target_os = "wasi")))
+                        .map(|p| {
+                            p.len() <= usize::from(cfg!(target_vendor = "browseros"))
+                        })
                         .unwrap_or(true)
                 }),
                 |s| s.hide(),

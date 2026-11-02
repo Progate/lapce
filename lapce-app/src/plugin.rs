@@ -184,9 +184,9 @@ impl PluginData {
             common,
         };
 
-        // WASI 版はまだ HTTP を持たないので、起動のたびに失敗を知らせない
+        // BrowserOS 版は HTTP を持たないので、起動のたびに失敗を知らせない
         // （プラグインの画面で検索したときは取りに行き、失敗を伝える）
-        #[cfg(not(target_os = "wasi"))]
+        #[cfg(not(target_vendor = "browseros"))]
         plugin.load_available_volts("", 0, core_rpc.clone());
 
         {
@@ -234,9 +234,9 @@ impl PluginData {
                 if s.as_ref() == Some(&query) {
                     return query;
                 }
-                // WASI 版はまだ HTTP を持たないので、起動のたびに失敗を知らせない
+                // BrowserOS 版は HTTP を持たないので、起動のたびに失敗を知らせない
                 // （検索語を打ったときは取りに行き、失敗を伝える）
-                if cfg!(target_os = "wasi") && s.is_none() {
+                if cfg!(target_vendor = "browseros") && s.is_none() {
                     return query;
                 }
                 plugin.available.query_id.update(|id| *id += 1);

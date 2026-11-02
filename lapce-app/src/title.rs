@@ -26,8 +26,8 @@ use crate::{
     workspace::LapceWorkspace,
 };
 
-/// BrowserOS（WASI）の中で動いているか。窓の枠・SSH・更新・デバッガーなど、そこで使えないものの口を隠すのに使う
-const IS_WASI: bool = cfg!(target_os = "wasi");
+/// BrowserOSの中で動いているか。窓の枠・SSH・更新・デバッガーなど、そこで使えないものの口を隠すのに使う
+const IS_BROWSEROS: bool = cfg!(target_vendor = "browseros");
 
 fn left(
     workspace: Arc<LapceWorkspace>,
@@ -39,9 +39,9 @@ fn left(
 ) -> impl View {
     let is_local = workspace.kind.is_local();
     let is_macos = cfg!(target_os = "macos");
-    // BrowserOS（WASI）の窓は枠と題を持たない（枠は WM が描くか、埋め込む側のタブが持つ）。
+    // BrowserOSの窓は枠と題を持たない（枠は WM が描くか、埋め込む側のタブが持つ）。
     // 枠の中に Linux 版の帯を描くと macOS の枠と Windows 風のボタンが並ぶので、帯は macOS 版と同じ並びにする
-    let is_macos_like = is_macos || IS_WASI;
+    let is_macos_like = is_macos || IS_BROWSEROS;
     stack((
         empty().style(move |s| {
             let should_hide = if is_macos {
@@ -145,7 +145,7 @@ fn left(
                 .padding_horiz(10.0)
                 .items_center()
                 .background(color)
-                .apply_if(IS_WASI, |s| s.hide())
+                .apply_if(IS_BROWSEROS, |s| s.hide())
                 .hover(|s| {
                     s.cursor(CursorStyle::Pointer).background(
                         config.color(LapceColor::PANEL_HOVERED_BACKGROUND),
@@ -220,8 +220,8 @@ fn middle(
         )
         .popout_menu(move || {
             let menu = Menu::new("");
-            // WASI にはフォルダーを選ぶ画面が無く（rfd は None を返す）、選んでも何も開かないので出さない
-            let menu = if IS_WASI {
+            // BrowserOS にはフォルダーを選ぶ画面が無く（rfd は None を返す）、選んでも何も開かないので出さない
+            let menu = if IS_BROWSEROS {
                 menu
             } else {
                 menu.entry(MenuItem::new(i18n::t("Open Folder")).action(move || {
@@ -303,8 +303,10 @@ fn middle(
                 || i18n::t("Run and Debug"),
                 config,
             )
-            // WASI ではデバッガー（DAP）を起こせないので、走らせる口ごと出さない（下の Debug の板も同じ。→ panel/kind.rs）
-            .style(move |s| s.margin_horiz(6.0).apply_if(IS_WASI, |s| s.hide())),
+            // BrowserOS ではデバッガー（DAP）を起こせないので、走らせる口ごと出さない（下の Debug の板も同じ。→ panel/kind.rs）
+            .style(move |s| {
+                s.margin_horiz(6.0).apply_if(IS_BROWSEROS, |s| s.hide())
+            }),
             drag_window_area(empty())
                 .style(|s| s.height_pct(100.0).flex_basis(0.0).flex_grow(1.0f32)),
         ))
@@ -389,8 +391,8 @@ fn right(
                         ),
                     )
                     .separator();
-                // WASI では新しい版を取りに行けない（HTTP が無い）ので、更新の項目は出さない
-                let menu = if IS_WASI {
+                // BrowserOS では新しい版を取りに行けない（HTTP が無い）ので、更新の項目は出さない
+                let menu = if IS_BROWSEROS {
                     menu
                 } else {
                     menu.entry(if let Some(v) = latest_version.get_untracked() {
@@ -557,7 +559,7 @@ pub fn window_controls_view(
     .style(move |s| {
         s.apply_if(
             cfg!(target_os = "macos")
-                || IS_WASI
+                || IS_BROWSEROS
                 || !config.get_untracked().core.custom_titlebar
                 || (is_title && num_window_tabs.get() > 1),
             |s| s.hide(),

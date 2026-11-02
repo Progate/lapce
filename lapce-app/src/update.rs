@@ -86,14 +86,14 @@ pub fn download_release(release: &ReleaseInfo) -> Result<PathBuf> {
 }
 
 /// BrowserOS の中の Lapce は OS が配った wasm で、自分を差し替えられない
-#[cfg(target_os = "wasi")]
+#[cfg(target_vendor = "browseros")]
 pub fn extract(_src: &Path, _process_path: &Path) -> Result<PathBuf> {
-    Err(anyhow!("Lapce cannot update itself on WASI"))
+    Err(anyhow!("Lapce cannot update itself in BrowserOS"))
 }
 
-#[cfg(target_os = "wasi")]
+#[cfg(target_vendor = "browseros")]
 pub fn restart(_path: &Path) -> Result<()> {
-    Err(anyhow!("Lapce cannot update itself on WASI"))
+    Err(anyhow!("Lapce cannot update itself in BrowserOS"))
 }
 
 #[cfg(target_os = "macos")]
@@ -121,7 +121,10 @@ pub fn extract(src: &Path, process_path: &Path) -> Result<PathBuf> {
     Ok(dest.join("Lapce.app"))
 }
 
-#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))]
+#[cfg(all(
+    any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"),
+    not(target_vendor = "browseros")
+))]
 pub fn extract(src: &Path, process_path: &Path) -> Result<PathBuf> {
     let tar_gz = std::fs::File::open(src)?;
     let tar = flate2::read::GzDecoder::new(tar_gz);
@@ -174,7 +177,10 @@ pub fn restart(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))]
+#[cfg(all(
+    any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"),
+    not(target_vendor = "browseros")
+))]
 pub fn restart(path: &Path) -> Result<()> {
     use std::os::unix::process::CommandExt;
     let _ = std::process::Command::new(path).arg("-n").exec();

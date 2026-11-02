@@ -94,7 +94,7 @@
 "Source Control: Discard File Changes" = "ソース管理: ファイルの変更を破棄"
 "Source Control: Discard Workspace Changes" = "ソース管理: ワークスペースの変更を破棄"
 
-# エディターの編集コマンド（wasip1/crates/floem/editor-core/src/command.rs の EditCommand。パレットとキー バインドの一覧に出る）
+# エディターの編集コマンド（browseros/crates/floem/editor-core/src/command.rs の EditCommand。パレットとキー バインドの一覧に出る）
 "Move Line Up" = "行を上へ移動"
 "Move Line Down" = "行を下へ移動"
 "Insert New Line" = "改行を挿入"

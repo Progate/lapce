@@ -7,7 +7,7 @@ inherits  = "dev"
 opt-level = 0
 debug     = false
 
-# BrowserOS（wasm32-wasip1-threads）では画面を CPU（tiny-skia）で描くので、wasm の SIMD を使う。
+# BrowserOS（wasm32-browseros-linux-musl）では画面を CPU（tiny-skia）で描くので、wasm の SIMD を使う。
 # 主なブラウザーはどれも対応している（Chrome 91 / Firefox 89 / Safari 16.4 以降）
-[target.wasm32-wasip1-threads]
+[target.wasm32-browseros-linux-musl]
 rustflags = ["-C", "target-feature=+simd128"]

@@ -713,7 +713,10 @@ impl View for TerminalView {
          * 言わないと、ホストの隠し入力は前に焦点を持っていたエディターの場所（無ければ画面の左上）に残り、
          * 日本語を変換するときの候補が端末から離れた所に出る
          */
-        if cfg!(target_os = "wasi") && self.is_focused && mode == Mode::Terminal {
+        if cfg!(target_vendor = "browseros")
+            && self.is_focused
+            && mode == Mode::Terminal
+        {
             let origin = self.id.layout_rect().origin();
             let x = content.cursor.point.column.0 as f64 * char_width;
             let y = (content.cursor.point.line.0 as f64
