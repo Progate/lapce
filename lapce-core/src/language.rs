@@ -246,16 +246,16 @@ pub enum LapceLanguage {
     Dockerfile,
     #[strum(message = "Dot")]
     Dot,
-    // EJS と ERB は文法（tree-sitter-embedded-template）を組み込んだ WASI 版にだけある（→ `load_grammar`）。
+    // EJS と ERB は文法（tree-sitter-embedded-template）を配る BrowserOS 版にだけある（→ `load_grammar`）。
     // ネイティブ版に足すと、文法を持たない .ejs / .erb がハイライトの無い別の言語として扱われてしまう
-    #[cfg(target_os = "wasi")]
+    #[cfg(target_vendor = "browseros")]
     #[strum(message = "EJS")]
     Ejs,
     #[strum(message = "Elixir")]
     Elixir,
     #[strum(message = "Elm")]
     Elm,
-    #[cfg(target_os = "wasi")]
+    #[cfg(target_vendor = "browseros")]
     #[strum(message = "ERB")]
     Erb,
     #[strum(message = "Erlang")]
@@ -352,7 +352,8 @@ pub enum LapceLanguage {
     Make,
     #[strum(message = "Markdown")]
     Markdown,
-    #[strum(serialize = "markdown.inline")]
+    // tree-sitter-md の injections.scm は `markdown_inline` と名指す
+    #[strum(to_string = "markdown.inline", serialize = "markdown_inline")]
     MarkdownInline,
     #[strum(message = "Meson")]
     Meson,
@@ -735,7 +736,7 @@ const LANGUAGES: &[SyntaxProperties] = &[
         comment: comment_properties!(),
         tree_sitter: TreeSitterProperties::DEFAULT,
     },
-    #[cfg(target_os = "wasi")]
+    #[cfg(target_vendor = "browseros")]
     SyntaxProperties {
         id: LapceLanguage::Ejs,
         indent: Indent::space(2),
@@ -772,7 +773,7 @@ const LANGUAGES: &[SyntaxProperties] = &[
         comment: comment_properties!("#"),
         tree_sitter: TreeSitterProperties::DEFAULT,
     },
-    #[cfg(target_os = "wasi")]
+    #[cfg(target_vendor = "browseros")]
     SyntaxProperties {
         id: LapceLanguage::Erb,
         indent: Indent::space(2),
@@ -1204,8 +1205,8 @@ const LANGUAGES: &[SyntaxProperties] = &[
     SyntaxProperties {
         id: LapceLanguage::Make,
         indent: Indent::tab(),
-        files: &[],
-        extensions: &[],
+        files: &["Makefile", "makefile", "GNUmakefile"],
+        extensions: &["mk"],
         comment: comment_properties!(),
         tree_sitter: TreeSitterProperties::DEFAULT,
     },
@@ -1213,7 +1214,7 @@ const LANGUAGES: &[SyntaxProperties] = &[
         id: LapceLanguage::Markdown,
         indent: Indent::space(4),
         files: &[],
-        extensions: &["md"],
+        extensions: &["md", "markdown"],
         comment: comment_properties!(),
         tree_sitter: TreeSitterProperties::DEFAULT,
     },
@@ -1708,7 +1709,7 @@ const LANGUAGES: &[SyntaxProperties] = &[
         id: LapceLanguage::Xml,
         indent: Indent::space(4),
         files: &[],
-        extensions: &["xml", "csproj"],
+        extensions: &["xml", "csproj", "svg", "xsd", "xsl", "xslt", "plist"],
         comment: comment_properties!("//"),
         tree_sitter: TreeSitterProperties::DEFAULT,
     },
@@ -1867,7 +1868,7 @@ impl LapceLanguage {
         // Try reading highlights from user config dir
         if let Some(queries_dir) = Directory::queries_directory() {
             // 利用者の置き場に無ければ、OS が文法と一緒に配る定義を読む（→ `Directory::system_queries_directory`）
-            #[cfg(target_os = "wasi")]
+            #[cfg(target_vendor = "browseros")]
             if !queries_dir.join(&query_name).exists() {
                 let system = Directory::system_queries_directory();
                 if system.join(&query_name).exists() {
@@ -1937,7 +1938,7 @@ impl LapceLanguage {
 /// 探すのは利用者の置き場（`grammars_directory`。ネイティブ版が取ってきた文法を置く所）、
 /// 次に OS が配る置き場（`Directory::system_grammars_directory`）。OS の置き場のファイルは
 /// 読まれたときに初めて取りに行くので、開いたファイルの言語の文法だけが届く
-#[cfg(target_os = "wasi")]
+#[cfg(target_vendor = "browseros")]
 fn load_grammar(
     grammar_name: &str,
     grammar_fn_name: &str,
@@ -1945,7 +1946,7 @@ fn load_grammar(
 ) -> Result<tree_sitter::Language, HighlightIssue> {
     use std::ffi::{CStr, CString, c_char, c_int, c_void};
 
-    // wasi-libc の宣言と同じもの。実体は browser-dyld の guest/dlfcn.c（build-wasm.mjs がリンクする）
+    // libc（musl）の dlopen(3)。BrowserOS では動的ローダー（browser-dyld）が .so を読む
     unsafe extern "C" {
         fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
         fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
@@ -1981,11 +1982,9 @@ fn load_grammar(
             last_error()
         )));
     }
-    let symbol = CString::new(format!(
-        "tree_sitter_{}",
-        grammar_fn_name.replace('-', "_")
-    ))
-    .map_err(|err| HighlightIssue::Error(err.to_string()))?;
+    let symbol =
+        CString::new(format!("tree_sitter_{}", grammar_fn_name.replace('-', "_")))
+            .map_err(|err| HighlightIssue::Error(err.to_string()))?;
     let language_fn = unsafe { dlsym(handle, symbol.as_ptr()) };
     if language_fn.is_null() {
         return Err(HighlightIssue::Error(format!(
@@ -2000,7 +1999,7 @@ fn load_grammar(
     Ok(unsafe { language_fn() })
 }
 
-#[cfg(not(target_os = "wasi"))]
+#[cfg(not(target_vendor = "browseros"))]
 fn load_grammar(
     grammar_name: &str,
     grammar_fn_name: &str,

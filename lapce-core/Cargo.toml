@@ -41,6 +41,6 @@ anyhow = { workspace = true }
 [target.'cfg(not(target_os = "linux"))'.build-dependencies]
 git2   = { workspace = true }
 
-# WASI（BrowserOS）では動かないもの。文法（tree-sitter）の動的読み込み。代わりの経路は src の `#[cfg(target_os = "wasi")]` を見よ
-[target.'cfg(not(target_os = "wasi"))'.dependencies]
+# WASI（BrowserOS）では動かないもの。文法（tree-sitter）の動的読み込み。代わりの経路は src の `#[cfg(target_vendor = "browseros")]` を見よ
+[target.'cfg(not(target_vendor = "browseros"))'.dependencies]
 libloading  = "0.8.1"

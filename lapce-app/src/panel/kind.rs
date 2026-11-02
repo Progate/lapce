@@ -51,11 +51,12 @@ impl PanelKind {
     /// この環境で働く板か。働かない板は並びから外し、絵の並び（activity bar）にも出さない
     /// （→ `retain_available_panels`）。
     ///
-    /// WASI（BrowserOS）では拡張（wasmtime）も LSP もデバッガー（DAP）も起こせないので、
-    /// それらに頼る板は何も映らない。消すと設定や保存した並びとの行き来が崩れるので、種類は残して並びからだけ外す。
+    /// BrowserOS では wasm の拡張（wasmtime）もデバッガー（DAP）も起こせないので、それらに頼る板は何も映らない。
+    /// 消すと設定や保存した並びとの行き来が崩れるので、種類は残して並びからだけ外す。LSP に頼る板（Problems・
+    /// シンボル・参照など）は、OS が言語サーバーを配っていれば働くので残す（→ lapce-proxy の plugin/language_server.rs）。
     /// 読み取り専用で開いたときは、端末とソース管理も外す
     pub fn is_available(&self) -> bool {
-        if !cfg!(target_os = "wasi") {
+        if !cfg!(target_vendor = "browseros") {
             return true;
         }
         match self {
@@ -66,14 +67,14 @@ impl PanelKind {
                 !lapce_core::read_only::is_enabled()
                     && !lapce_core::embed::hides_source_control()
             }
-            PanelKind::FileExplorer | PanelKind::Search => true,
-            PanelKind::Plugin
+            PanelKind::FileExplorer
+            | PanelKind::Search
             | PanelKind::Problem
-            | PanelKind::Debug
             | PanelKind::CallHierarchy
             | PanelKind::DocumentSymbol
             | PanelKind::References
-            | PanelKind::Implementation => false,
+            | PanelKind::Implementation => true,
+            PanelKind::Plugin | PanelKind::Debug => false,
         }
     }
 

@@ -10,8 +10,6 @@ pub mod read_only;
 pub mod rope_text_pos;
 pub mod style;
 pub mod syntax;
-#[cfg(target_os = "wasi")]
-pub mod xdg;
 
 // This is primarily being re-exported to avoid changing every single usage
 // in lapce-app. We should probably remove this at some point.

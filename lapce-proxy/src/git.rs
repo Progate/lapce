@@ -1,4 +1,4 @@
-//! ソース管理（libgit2）。WASI では `git_wasi.rs` が同じ名前で置き換わる
+//! ソース管理（libgit2）。BrowserOS では `git_cli.rs` が同じ名前で置き換わる
 
 use std::{
     collections::HashSet,

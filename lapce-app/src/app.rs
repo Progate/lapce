@@ -150,24 +150,24 @@ struct Cli {
 
     /// Open the workspace read-only: no editing, saving, terminal or source control
     /// (BrowserOS only. → lapce_core::read_only)
-    #[cfg(target_os = "wasi")]
+    #[cfg(target_vendor = "browseros")]
     #[clap(long, action)]
     read_only: bool,
 
     /// Don't show the title bar (command palette and navigation) at the top of the window
     /// (BrowserOS only. → lapce_core::embed)
-    #[cfg(target_os = "wasi")]
+    #[cfg(target_vendor = "browseros")]
     #[clap(long, action)]
     no_title_bar: bool,
 
     /// Don't show the Open Editors section above the file explorer
     /// (BrowserOS only. → lapce_core::embed)
-    #[cfg(target_os = "wasi")]
+    #[cfg(target_vendor = "browseros")]
     #[clap(long, action)]
     no_open_editors: bool,
 
     /// Don't show the source control panel (BrowserOS only. → lapce_core::embed)
-    #[cfg(target_os = "wasi")]
+    #[cfg(target_vendor = "browseros")]
     #[clap(long, action)]
     no_source_control: bool,
 
@@ -2212,7 +2212,9 @@ fn empty_editor_view(window_tab_data: Rc<WindowTabData>) -> impl View {
             .flex_col()
             .items_center()
             .justify_center()
-            .apply_if(!cfg!(target_os = "wasi") || has_editor, |s| s.hide())
+            .apply_if(!cfg!(target_vendor = "browseros") || has_editor, |s| {
+                s.hide()
+            })
     })
     .debug_name("Empty Editor")
 }
@@ -3891,22 +3893,13 @@ fn window(window_data: WindowData) -> impl View {
 }
 
 pub fn launch() {
-    /*
-     * WASI の作業ディレクトリは wasi-libc がプロセスの中で持っていて、起動時は `/` である。
-     * BrowserOS は起動した場所を PWD で渡すので、引数の相対パスを解く前にそこへ移る
-     */
-    #[cfg(target_os = "wasi")]
-    if let Some(pwd) = std::env::var_os("PWD") {
-        let _ = std::env::set_current_dir(pwd);
-    }
-
     let cli = Cli::parse();
     // 板の並びや文書を作るより先に決める（どれも作るときに読む）
-    #[cfg(target_os = "wasi")]
+    #[cfg(target_vendor = "browseros")]
     if cli.read_only {
         lapce_core::read_only::enable();
     }
-    #[cfg(target_os = "wasi")]
+    #[cfg(target_vendor = "browseros")]
     lapce_core::embed::set(lapce_core::embed::Embed {
         no_title_bar: cli.no_title_bar,
         no_open_editors: cli.no_open_editors,
@@ -3951,8 +3944,8 @@ pub fn launch() {
     }
 
     let stdin = std::io::stdin();
-    // シェルを起動して環境変数を取り込む。WASI の std は子プロセスを起動できない
-    #[cfg(not(target_os = "wasi"))]
+    // シェルを起動して環境変数を取り込む。BrowserOS では環境は起こした OS が渡す（取り込むログインシェルの設定が無い）
+    #[cfg(not(target_vendor = "browseros"))]
     if !stdin.is_terminal() {
         trace!(TraceLevel::INFO, "Loading custom environment from shell");
         load_shell_env();
@@ -3961,9 +3954,9 @@ pub fn launch() {
     // small hack to unblock terminal if launched from it
     // launch it as a separate process that waits
     //
-    // WASI の std は子プロセスを起動できないので、自分を起動し直さずにこのまま窓を開く
-    // （端末を塞ぎたくなければ、シェルの `&` で背後へ回す）
-    #[cfg(not(target_os = "wasi"))]
+    // BrowserOS では自分を起動し直さずにこのまま窓を開く。起動し直すと lapce.wasm の読み込みと
+    // コンパイルをもう一度払うことになる（端末を塞ぎたくなければ、シェルの `&` で背後へ回す）
+    #[cfg(not(target_vendor = "browseros"))]
     if !cli.wait {
         let mut args = std::env::args().collect::<Vec<_>>();
         args.push("--wait".to_string());
@@ -4048,8 +4041,7 @@ pub fn launch() {
     let plugin_paths = Arc::new(cli.plugin_path);
 
     let (tx, rx) = channel();
-    // WASI では notify の既定が 30 秒おきに見に行く PollWatcher なので、設定を変えても画面に出るまで待たされる。
-    // proxy と同じく BrowserOS の inotify を使う見張りにする（ほかの OS では notify の既定と同じ）
+    // proxy と同じ見張り（notify の既定。Linux と BrowserOS では inotify）
     let mut watcher = <lapce_proxy::watcher::RecommendedWatcher as Watcher>::new(
         ConfigWatcher::new(tx),
         notify::Config::default(),
@@ -4100,10 +4092,10 @@ pub fn launch() {
     };
 
     /*
-     * WASI にはフォルダーを選ぶ画面が無い（rfd は None を返す）ので、何も渡されずに起動すると
+     * BrowserOS にはフォルダーを選ぶ画面が無い（rfd は None を返す）ので、何も渡されずに起動すると
      * 「Open Folder」から先へ進めない。起動した場所（デスクトップから開けばホーム）を開く
      */
-    #[cfg(target_os = "wasi")]
+    #[cfg(target_vendor = "browseros")]
     let paths = if cli.paths.is_empty() {
         std::env::current_dir()
             .ok()
@@ -4113,7 +4105,7 @@ pub fn launch() {
     } else {
         cli.paths
     };
-    #[cfg(not(target_os = "wasi"))]
+    #[cfg(not(target_vendor = "browseros"))]
     let paths = cli.paths;
 
     let app = app_data.create_windows(db.clone(), paths);
@@ -4334,23 +4326,12 @@ pub fn load_shell_env() {
 }
 
 /// A connection to a running Lapce's local socket
-#[cfg(not(target_os = "wasi"))]
 type LocalSocketStream = interprocess::local_socket::LocalSocketStream;
-/// A connection to a running Lapce's local socket. WASI's std has no Unix domain sockets, but
-/// BrowserOS takes Linux's socket calls (→ lapce_proxy::local_socket_wasi)
-#[cfg(target_os = "wasi")]
-type LocalSocketStream = std::fs::File;
 
-#[cfg(not(target_os = "wasi"))]
 fn connect_local_socket(path: &Path) -> Result<LocalSocketStream> {
     Ok(interprocess::local_socket::LocalSocketStream::connect(
         path,
     )?)
-}
-
-#[cfg(target_os = "wasi")]
-fn connect_local_socket(path: &Path) -> Result<LocalSocketStream> {
-    Ok(lapce_proxy::local_socket_wasi::connect(path)?)
 }
 
 pub fn get_socket() -> Result<LocalSocketStream> {
@@ -4443,7 +4424,6 @@ fn prepare_local_socket(local_socket: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "wasi"))]
 fn listen_local_socket(
     local_socket: &Path,
     tx: SyncSender<RemoteCommand>,
@@ -4451,22 +4431,6 @@ fn listen_local_socket(
     prepare_local_socket(local_socket)?;
     let socket =
         interprocess::local_socket::LocalSocketListener::bind(local_socket)?;
-
-    for stream in socket.incoming().flatten() {
-        let tx = tx.clone();
-        std::thread::spawn(move || serve_local_socket_client(stream, tx));
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "wasi")]
-fn listen_local_socket(
-    local_socket: &Path,
-    tx: SyncSender<RemoteCommand>,
-) -> Result<()> {
-    prepare_local_socket(local_socket)?;
-    let socket =
-        lapce_proxy::local_socket_wasi::LocalSocketListener::bind(local_socket)?;
 
     for stream in socket.incoming().flatten() {
         let tx = tx.clone();

@@ -1,5 +1,7 @@
 pub mod catalog;
 pub mod dap;
+#[cfg(target_vendor = "browseros")]
+pub mod language_server;
 pub mod lsp;
 pub mod psp;
 pub mod wasi;

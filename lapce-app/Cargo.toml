@@ -7,6 +7,7 @@ edition      = { workspace = true }
 rust-version = { workspace = true }
 
 [dependencies]
+interprocess = { workspace = true }
 alacritty_terminal = { workspace = true }
 notify             = { workspace = true }
 anyhow             = { workspace = true }
@@ -81,9 +82,8 @@ criterion = "0.5"
 name    = "visual_line"
 harness = false
 
-# WASI（BrowserOS）では動かないもの。プラグインの実行・git・端末・ゴミ箱・HTTP・
-# 単一起動のための IPC。代わりの経路は src の `#[cfg(target_os = "wasi")]` を見よ
-[target.'cfg(not(target_os = "wasi"))'.dependencies]
-interprocess       = { workspace = true }
+# BrowserOS では使わないもの。HTTP（プラグインの取得・更新の確認）と、ほかのアプリで開く `open`（`xdg-open` が居ない）。
+# 代わりの経路は src の `#[cfg(target_vendor = "browseros")]` を見よ
+[target.'cfg(not(target_vendor = "browseros"))'.dependencies]
 reqwest            = { workspace = true }
 open             = { version = "5.1.4" }

@@ -5,21 +5,13 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, unbounded};
-#[cfg(target_os = "wasi")]
-use notify::Config;
-#[cfg(not(target_os = "wasi"))]
 pub use notify::RecommendedWatcher;
-#[cfg(not(target_os = "wasi"))]
 use notify::recommended_watcher;
 use notify::{
     Event, EventKind, RecursiveMode, Watcher,
     event::{ModifyKind, RenameMode},
 };
 
-/// WASI では notify の既定（周期的に見に行く PollWatcher）ではなく、BrowserOS の inotify を使う。
-/// 画面（lapce-app）が設定ファイルを見張るのにも使う
-#[cfg(target_os = "wasi")]
-pub type RecommendedWatcher = crate::inotify_wasi::InotifyWatcher;
 use parking_lot::Mutex;
 
 /// Wrapper around a `notify::Watcher`. It runs the inner watcher
@@ -71,11 +63,7 @@ impl FileWatcher {
 
         let state = Arc::new(Mutex::new(WatcherState::default()));
 
-        #[cfg(not(target_os = "wasi"))]
         let inner = recommended_watcher(tx_event).expect("watcher should spawn");
-        #[cfg(target_os = "wasi")]
-        let inner = RecommendedWatcher::new(tx_event, Config::default())
-            .expect("watcher should spawn");
 
         FileWatcher {
             rx_event: Some(rx_event),

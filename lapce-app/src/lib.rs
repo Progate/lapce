@@ -26,8 +26,8 @@ pub mod listener;
 pub mod lsp;
 pub mod main_split;
 pub mod markdown;
-#[cfg(target_os = "wasi")]
-mod open_wasi;
+#[cfg(target_vendor = "browseros")]
+mod open_browseros;
 pub mod palette;
 pub mod panel;
 pub mod plugin;

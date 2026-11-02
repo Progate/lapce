@@ -7,8 +7,8 @@ use std::{
     sync::Arc,
 };
 
-#[cfg(target_os = "wasi")]
-use crate::open_wasi as open;
+#[cfg(target_vendor = "browseros")]
+use crate::open_browseros as open;
 use floem::{
     action::show_context_menu,
     event::EventPropagation,
