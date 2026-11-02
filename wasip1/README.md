@@ -27,6 +27,9 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
 
 - **winit** に `platform_impl/wasi` を足した（Redox の orbital と同じ形。窓 1 つにつき接続 1 本）。
   画素は `platform::wasi::WindowExtWasi::present_rgba` で渡し、前のフレームから変わった行だけを送る
+- キーの文字と記号は、学習者のキーボードの配列でホストが決めて windowserver が `key` に添える（接続の頭で
+  `key-symbols` と言う）。winit はそれを `text`・`logical_key` にし、キーの番号から US 配列の文字を作り直さない
+  （作り直すと JIS の Shift+2 が `@` になり、Ctrl+] が Ctrl+\ になる）。添えられていないキーだけ US 配列の表に落とす
 - **floem** は WASI では GPU を使わず tiny-skia で描く（BrowserOS の中のプロセスから WebGPU は呼べない）
 - 倍率は `WINIT_SCALE_FACTOR` で受け取る（画面の画素と見た目の 1px の比はホストが決める）
 

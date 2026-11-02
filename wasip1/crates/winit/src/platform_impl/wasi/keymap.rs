@@ -1,20 +1,28 @@
 //! evdev のキー番号（`linux/input-event-codes.h` の `KEY_*`）から winit のキーへ。
 //!
-//! windowserver が送るのは**物理キーの番号だけ**で、文字は送らない（打った文字が届くのは
-//! IME で確定したときだけ。→ `text` / `preedit`）。だから文字は US 配列として
-//! ここで決める。Linux の端末（`loadkeys us`）が同じことをしている。
+//! 文字と記号は、学習者のキーボードの配列でホストが決めてキーに添えて届く（→ connection.rs の `Key` の
+//! `text` と `symbol`）。ここの文字の表（US 配列）を使うのは、添えられていないときだけである。記号を送らない前の
+//! windowserver と、ホストが決められなかったキー（Mac の Option を押したまま初めて打ったキー）がそれにあたる
 
 use crate::keyboard::{KeyCode, NamedKey};
 
 pub(super) struct KeyInfo {
     pub code: KeyCode,
     pub named: Option<NamedKey>,
-    /// 何も押さずに打った文字と、Shift を押して打った文字
+    /// 何も押さずに打った文字と、Shift を押して打った文字（US 配列）
     pub chars: Option<(char, char)>,
+    /// テンキーのキーか（winit の `KeyLocation::Numpad`）
+    pub numpad: bool,
 }
 
 const fn key(code: KeyCode, named: Option<NamedKey>, chars: Option<(char, char)>) -> KeyInfo {
-    KeyInfo { code, named, chars }
+    KeyInfo { code, named, chars, numpad: false }
+}
+
+/// テンキーのキー。`named` は NumLock を切ったときのキー（xkb の `KP_Home` など）で、ホストが記号を添えない
+/// （ブラウザーの `KeyboardEvent.key` が `Home` のような名前になる）ときに使う
+const fn keypad(code: KeyCode, named: Option<NamedKey>, chars: Option<(char, char)>) -> KeyInfo {
+    KeyInfo { code, named, chars, numpad: true }
 }
 
 pub(super) fn lookup(evdev: u16) -> Option<KeyInfo> {
@@ -76,6 +84,7 @@ pub(super) fn lookup(evdev: u16) -> Option<KeyInfo> {
         52 => key(K::Period, None, c('.', '>')),
         53 => key(K::Slash, None, c('/', '?')),
         54 => key(K::ShiftRight, Some(N::Shift), None),
+        55 => keypad(K::NumpadMultiply, None, c('*', '*')),
         56 => key(K::AltLeft, Some(N::Alt), None),
         57 => key(K::Space, Some(N::Space), c(' ', ' ')),
         58 => key(K::CapsLock, Some(N::CapsLock), None),
@@ -89,9 +98,28 @@ pub(super) fn lookup(evdev: u16) -> Option<KeyInfo> {
         66 => key(K::F8, Some(N::F8), None),
         67 => key(K::F9, Some(N::F9), None),
         68 => key(K::F10, Some(N::F10), None),
+        71 => keypad(K::Numpad7, Some(N::Home), None),
+        72 => keypad(K::Numpad8, Some(N::ArrowUp), None),
+        73 => keypad(K::Numpad9, Some(N::PageUp), None),
+        74 => keypad(K::NumpadSubtract, None, c('-', '-')),
+        75 => keypad(K::Numpad4, Some(N::ArrowLeft), None),
+        76 => keypad(K::Numpad5, Some(N::Clear), None),
+        77 => keypad(K::Numpad6, Some(N::ArrowRight), None),
+        78 => keypad(K::NumpadAdd, None, c('+', '+')),
+        79 => keypad(K::Numpad1, Some(N::End), None),
+        80 => keypad(K::Numpad2, Some(N::ArrowDown), None),
+        81 => keypad(K::Numpad3, Some(N::PageDown), None),
+        82 => keypad(K::Numpad0, Some(N::Insert), None),
+        83 => keypad(K::NumpadDecimal, Some(N::Delete), None),
+        // ISO 配列の、左 Shift の隣のキー（xkb の `us` では `<` と `>`）
+        86 => key(K::IntlBackslash, None, c('<', '>')),
         87 => key(K::F11, Some(N::F11), None),
         88 => key(K::F12, Some(N::F12), None),
+        // JIS 配列の「ろ」（xkb の `jp` では `\` と `_`。US 配列には無いキー）
+        89 => key(K::IntlRo, None, c('\\', '_')),
+        96 => keypad(K::NumpadEnter, Some(N::Enter), None),
         97 => key(K::ControlRight, Some(N::Control), None),
+        98 => keypad(K::NumpadDivide, None, c('/', '/')),
         100 => key(K::AltRight, Some(N::Alt), None),
         102 => key(K::Home, Some(N::Home), None),
         103 => key(K::ArrowUp, Some(N::ArrowUp), None),
@@ -103,6 +131,8 @@ pub(super) fn lookup(evdev: u16) -> Option<KeyInfo> {
         109 => key(K::PageDown, Some(N::PageDown), None),
         110 => key(K::Insert, Some(N::Insert), None),
         111 => key(K::Delete, Some(N::Delete), None),
+        // JIS 配列の「¥」（xkb の `jp` では `\` と `|`。US 配列には無いキー）
+        124 => key(K::IntlYen, None, c('\\', '|')),
         125 => key(K::SuperLeft, Some(N::Super), None),
         126 => key(K::SuperRight, Some(N::Super), None),
         _ => return None,

@@ -26,7 +26,9 @@ pub(super) enum ServerMessage {
     /// `button` は X と同じ番号（1 左・2 中・3 右）。動いただけの知らせは 0
     Pointer { phase: PointerPhase, x: f64, y: f64, button: u32 },
     Scroll { x: f64, y: f64, delta_x: f64, delta_y: f64 },
-    Key { state: KeyState, code: u16 },
+    /// `text` はその打鍵で打たれる文字、`symbol` はホストの配列で決まったそのキーの記号（X11 の keysym）。
+    /// どちらもホストが決められなかったキーには無い（→ browser-os の windowserver の `key`）
+    Key { state: KeyState, code: u16, text: Option<String>, symbol: Option<String> },
     Text { text: String },
     Preedit { text: String },
     /// 貼り付け板の中身（中身が変わったときと、焦点が来たときに届く）
@@ -46,6 +48,22 @@ pub(super) enum KeyState {
     Down,
     Up,
     Repeat,
+}
+
+/// `key` の欄を読む。記号を求めた接続（`key-symbols`）では、文字と記号の 2 つの欄が、空でも消えないよう `=` を頭に付けて
+/// 並ぶ。求める前の形では、文字だけが `=` 無しで付く
+fn key_field(rest: &[&str], index: usize, with_symbol: bool) -> Option<String> {
+    let field = rest.get(index)?;
+    non_empty(if with_symbol { decode_field(field) } else { decode_text(field) })
+}
+
+/// 頭の `=`（空の欄を消さないための印）を外してほどく
+fn decode_field(field: &str) -> String {
+    decode_text(field.strip_prefix('=').unwrap_or(field))
+}
+
+fn non_empty(text: String) -> Option<String> {
+    (!text.is_empty()).then_some(text)
 }
 
 /// `%XX` をほどく（windowserver の `encodeText` と対）
@@ -124,6 +142,8 @@ pub(super) fn parse_line(line: &str) -> Option<ServerMessage> {
                 _ => return None,
             },
             code: rest.get(1)?.parse().ok()?,
+            text: key_field(&rest, 2, rest.len() > 3),
+            symbol: rest.get(3).and_then(|field| non_empty(decode_field(field))),
         },
         "text" => ServerMessage::Text { text: decode_text(rest.first().copied().unwrap_or("")) },
         "preedit" => {
@@ -190,6 +210,11 @@ impl Connection {
             )
         })?;
         set_nonblocking(&socket)?;
+        /*
+         * キーにその記号を添えてもらう。言わないと、Ctrl などを押したまま打ったキーは番号しか届かず、配列を知らない
+         * ここでは US 配列の位置で文字を決めるしかない（JIS の Ctrl+] が Ctrl+\ になる）。窓をもらう前に言う
+         */
+        socket.write_all(b"key-symbols\n")?;
         // 置く画面を言う（X の CreateWindow の親をその画面のルート窓にするのと同じ）。画面 0 は言わない
         let request = if screen == 0 {
             format!("surface {width} {height}\n")
@@ -374,6 +399,38 @@ mod tests {
         assert_eq!(
             parse_line("text 3 %E3%81%82"),
             Some(ServerMessage::Text { text: "あ".into() })
+        );
+        assert_eq!(
+            parse_line("key 3 down 30 a"),
+            Some(ServerMessage::Key {
+                state: KeyState::Down,
+                code: 30,
+                text: Some("a".into()),
+                symbol: None
+            })
+        );
+        // JIS の Shift+2 と、Ctrl を押したまま @ のキー（US 配列の [ の位置）
+        assert_eq!(
+            parse_line("key 3 down 3 =%22 =%22"),
+            Some(ServerMessage::Key {
+                state: KeyState::Down,
+                code: 3,
+                text: Some("\"".into()),
+                symbol: Some("\"".into())
+            })
+        );
+        assert_eq!(
+            parse_line("key 3 down 26 = =%40"),
+            Some(ServerMessage::Key {
+                state: KeyState::Down,
+                code: 26,
+                text: None,
+                symbol: Some("@".into())
+            })
+        );
+        assert_eq!(
+            parse_line("key 3 up 26"),
+            Some(ServerMessage::Key { state: KeyState::Up, code: 26, text: None, symbol: None })
         );
         assert_eq!(parse_line("bogus 3"), None);
     }

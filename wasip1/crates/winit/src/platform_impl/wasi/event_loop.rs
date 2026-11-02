@@ -39,6 +39,9 @@ struct WindowState {
     pressed: ModifiersKeys,
     pointer: Option<(f64, f64)>,
     button_down: bool,
+    /// Shift を押さずに打ったときの、そのキーの記号（evdev の番号 → 記号）。Shift を押したまま打ったキーの
+    /// `key_without_modifiers` に使う。ホストは Shift の効いた記号しか添えないので、押さずに打ったときに覚えておく
+    unshifted: std::collections::HashMap<u16, char>,
 }
 
 impl WindowState {
@@ -184,8 +187,8 @@ impl EventLoop {
                     phase: event::TouchPhase::Moved,
                 });
             },
-            ServerMessage::Key { state: key_state, code } => {
-                Self::process_key(state, key_state, code, &mut |event| emit(app, event));
+            ServerMessage::Key { state: key_state, code, text, symbol } => {
+                Self::process_key(state, key_state, code, text, symbol, &mut |event| emit(app, event));
             },
             ServerMessage::Text { text } => {
                 emit(app, event::WindowEvent::Ime(Ime::Preedit(String::new(), None)));
@@ -204,6 +207,8 @@ impl EventLoop {
         state: &mut WindowState,
         key_state: KeyState,
         code: u16,
+        host_text: Option<String>,
+        host_symbol: Option<String>,
         emit: &mut dyn FnMut(event::WindowEvent),
     ) {
         let pressed = key_state != KeyState::Up;
@@ -230,43 +235,69 @@ impl EventLoop {
 
         let shift = state.modifiers.shift_key();
         let control = state.modifiers.control_key();
-        let (logical_key, key_without_modifiers, text, text_with_all_modifiers) = match &info {
-            Some(keymap::KeyInfo { named: Some(named), chars: None, .. }) => {
-                let text = match named {
-                    crate::keyboard::NamedKey::Enter => Some(SmolStr::new("\r")),
-                    crate::keyboard::NamedKey::Tab => Some(SmolStr::new("\t")),
-                    _ => None,
-                };
-                let key = Key::Named(*named);
-                (key.clone(), key, text.clone().filter(|_| pressed), text.filter(|_| pressed))
-            },
-            Some(keymap::KeyInfo { named, chars: Some((lower, upper)), .. }) => {
-                let character = if shift { *upper } else { *lower };
-                let logical = match named {
-                    Some(named) => Key::Named(*named),
-                    None => Key::Character(SmolStr::from(character.to_string())),
-                };
-                let without = match named {
-                    Some(named) => Key::Named(*named),
-                    None => Key::Character(SmolStr::from(lower.to_string())),
-                };
-                let text = pressed.then(|| SmolStr::from(character.to_string()));
-                // Ctrl を押していれば制御文字になる（Ctrl+A → 0x01。実物の端末と同じ）
-                let all = if control && character.is_ascii_alphabetic() {
-                    let control_char =
-                        ((character.to_ascii_lowercase() as u8 - b'a') + 1) as char;
-                    pressed.then(|| SmolStr::from(control_char.to_string()))
+        /*
+         * **記号はホストが添えたものを使う。** キーの番号から文字を作り直すと、配列を知らないので US 配列の文字になり、
+         * JIS の Shift+2 が `@` になる。ホストは学習者の配列で決めた記号（Shift は効き、Ctrl・Alt・⌘ は効かない。
+         * xkb の keysym と同じ）を添えるので、それを `logical_key` にする。添えられていないときだけ US 配列の表に落とす
+         */
+        let symbol = host_symbol.as_deref().and_then(single_char);
+        if let (Some(symbol), false) = (symbol, shift) {
+            state.unshifted.insert(code, symbol);
+        }
+        let fallback = info.as_ref().and_then(|info| info.chars).map(|(lower, upper)| if shift { upper } else { lower });
+        let named = info.as_ref().and_then(|info| info.named);
+        let character = match (symbol, named) {
+            // 空白は文字を添えられても名前のキーのまま（Linux の winit も `NamedKey::Space` にする）
+            (Some(_), Some(crate::keyboard::NamedKey::Space)) => None,
+            (Some(symbol), _) => Some(symbol),
+            (None, Some(_)) => None,
+            (None, None) => fallback,
+        };
+        let (logical_key, key_without_modifiers, text, text_with_all_modifiers) = match (character, named) {
+            (Some(character), _) => {
+                let logical = Key::Character(SmolStr::from(character.to_string()));
+                /*
+                 * Shift を押さずに打った記号（Lapce はショートカットをこれで引く）。Shift を押したままなら、押さずに打った
+                 * ときに覚えた記号を使い、まだ覚えていなければ英字は小文字に、ほかは US 配列の表にする
+                 */
+                let unshifted = if !shift {
+                    Some(character)
                 } else {
-                    text.clone()
+                    state.unshifted.get(&code).copied().or_else(|| {
+                        if character.is_alphabetic() {
+                            character.to_lowercase().next()
+                        } else {
+                            info.as_ref().and_then(|info| info.chars).map(|(lower, _)| lower)
+                        }
+                    })
+                };
+                let without = Key::Character(SmolStr::from(unshifted.unwrap_or(character).to_string()));
+                // 打たれる文字はホストが決めたもの。Ctrl などを押したままで添えられていなければ、Linux の winit と同じく記号の文字
+                let text = pressed.then(|| SmolStr::from(host_text.clone().unwrap_or_else(|| character.to_string())));
+                // Ctrl を押していれば制御文字になる（xkb の XkbToControl と同じ。Ctrl+A → 0x01、JIS の Ctrl+@ → NUL）
+                let all = match control.then(|| control_character(character)).flatten() {
+                    Some(control_char) => pressed.then(|| SmolStr::from(control_char.to_string())),
+                    None => text.clone(),
                 };
                 (logical, without, text, all)
             },
-            _ => {
+            (None, Some(named)) => {
+                let text = match named {
+                    crate::keyboard::NamedKey::Enter => Some(SmolStr::new("\r")),
+                    crate::keyboard::NamedKey::Tab => Some(SmolStr::new("\t")),
+                    crate::keyboard::NamedKey::Space => Some(SmolStr::new(" ")),
+                    _ => None,
+                };
+                let key = Key::Named(named);
+                (key.clone(), key, text.clone().filter(|_| pressed), text.filter(|_| pressed))
+            },
+            (None, None) => {
                 let key = Key::Unidentified(NativeKey::Xkb(code as u32 + 8));
                 (key.clone(), key, None, None)
             },
         };
         let location = match info.as_ref().map(|info| info.code) {
+            _ if info.as_ref().is_some_and(|info| info.numpad) => KeyLocation::Numpad,
             Some(
                 KeyCode::ShiftLeft | KeyCode::ControlLeft | KeyCode::AltLeft | KeyCode::SuperLeft,
             ) => KeyLocation::Left,
@@ -558,5 +589,122 @@ pub(crate) struct OwnedDisplayHandle;
 impl rwh_06::HasDisplayHandle for OwnedDisplayHandle {
     fn display_handle(&self) -> Result<rwh_06::DisplayHandle<'_>, rwh_06::HandleError> {
         Err(rwh_06::HandleError::NotSupported)
+    }
+}
+
+/// 1 文字の文字列ならその文字
+fn single_char(text: &str) -> Option<char> {
+    let mut chars = text.chars();
+    let first = chars.next()?;
+    chars.next().is_none().then_some(first)
+}
+
+/// Ctrl と組んだ記号が産む制御文字（xkb の `XkbToControl` と同じ。`@`〜`~` と空白は下位 5 ビット、`2` は NUL、
+/// `3`〜`7` は ESC〜US、`8` は DEL、`/` は US）
+fn control_character(character: char) -> Option<char> {
+    let byte = u8::try_from(u32::from(character)).ok()?;
+    Some(char::from(match byte {
+        b'@'..=b'~' | b' ' => byte & 0x1f,
+        b'2' => 0,
+        b'3'..=b'7' => byte - b'3' + 0x1b,
+        b'8' => 0x7f,
+        b'/' => 0x1f,
+        _ => return None,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keyboard::NamedKey;
+
+    /// キーを 1 つ流して、届いた KeyboardInput を返す
+    fn press(state: &mut WindowState, code: u16, text: Option<&str>, symbol: Option<&str>) -> event::KeyEvent {
+        let mut events = Vec::new();
+        EventLoop::process_key(
+            state,
+            KeyState::Down,
+            code,
+            text.map(str::to_owned),
+            symbol.map(str::to_owned),
+            &mut |event| events.push(event),
+        );
+        events
+            .into_iter()
+            .find_map(|event| match event {
+                event::WindowEvent::KeyboardInput { event, .. } => Some(event),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    fn character(text: &str) -> Key {
+        Key::Character(SmolStr::new(text))
+    }
+
+    #[test]
+    fn jis_shift_2_types_the_quote() {
+        let mut state = WindowState::default();
+        press(&mut state, 42, None, None);
+        let event = press(&mut state, 3, Some("\""), Some("\""));
+        assert_eq!(event.logical_key, character("\""));
+        assert_eq!(event.text.as_deref(), Some("\""));
+        assert_eq!(event.platform_specific.key_without_modifiers, character("2"));
+    }
+
+    #[test]
+    fn control_uses_the_host_symbol_not_the_us_position() {
+        let mut state = WindowState::default();
+        press(&mut state, 29, None, None);
+        // JIS の @ は US 配列の [ の位置（26）にある
+        let event = press(&mut state, 26, None, Some("@"));
+        assert_eq!(event.logical_key, character("@"));
+        assert_eq!(event.platform_specific.key_without_modifiers, character("@"));
+        assert_eq!(event.platform_specific.text_with_all_modifiers.as_deref(), Some("\0"));
+        // JIS の ] は US 配列の \ の位置（43）にある
+        let event = press(&mut state, 43, None, Some("]"));
+        assert_eq!(event.platform_specific.key_without_modifiers, character("]"));
+    }
+
+    #[test]
+    fn shifted_key_remembers_the_unshifted_symbol() {
+        let mut state = WindowState::default();
+        press(&mut state, 26, Some("@"), Some("@"));
+        press(&mut state, 42, None, None);
+        let event = press(&mut state, 26, Some("`"), Some("`"));
+        assert_eq!(event.logical_key, character("`"));
+        assert_eq!(event.platform_specific.key_without_modifiers, character("@"));
+    }
+
+    #[test]
+    fn without_a_symbol_falls_back_to_the_us_layout() {
+        let mut state = WindowState::default();
+        let event = press(&mut state, 26, None, None);
+        assert_eq!(event.logical_key, character("["));
+        assert_eq!(event.text.as_deref(), Some("["));
+    }
+
+    #[test]
+    fn jis_and_numpad_keys_are_known() {
+        let mut state = WindowState::default();
+        let yen = press(&mut state, 124, Some("¥"), Some("¥"));
+        assert_eq!(yen.physical_key, PhysicalKey::Code(KeyCode::IntlYen));
+        assert_eq!(yen.logical_key, character("¥"));
+        let seven = press(&mut state, 71, Some("7"), Some("7"));
+        assert_eq!(seven.location, KeyLocation::Numpad);
+        assert_eq!(seven.logical_key, character("7"));
+        // NumLock を切ったテンキーには記号が付かない（ブラウザーの key が Home になる）
+        let home = press(&mut state, 71, None, None);
+        assert_eq!(home.logical_key, Key::Named(NamedKey::Home));
+        let enter = press(&mut state, 96, None, None);
+        assert_eq!(enter.logical_key, Key::Named(NamedKey::Enter));
+    }
+
+    #[test]
+    fn space_stays_a_named_key() {
+        let mut state = WindowState::default();
+        let event = press(&mut state, 57, Some(" "), Some(" "));
+        assert_eq!(event.logical_key, Key::Named(NamedKey::Space));
+        assert_eq!(event.text.as_deref(), Some(" "));
     }
 }
