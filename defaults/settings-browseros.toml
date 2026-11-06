@@ -1,0 +1,8 @@
+#:schema ../extra/schemas/settings.json
+
+# BrowserOS 版だけの既定（defaults/settings.toml の上に重ねる → lapce-app/src/config.rs の default_config）。
+# 利用者の settings.toml とフォルダーの .lapce/settings.toml は、これより後に重なる
+
+[editor]
+# 演習の画面に埋め込むと 13 では小さい。端末の文字（terminal.font-size = 0）もこれに合わせて大きくなる
+font-size = 15
