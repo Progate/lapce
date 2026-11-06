@@ -3,19 +3,12 @@
 pub mod buffer;
 pub mod cli;
 pub mod dispatch;
-#[cfg(not(target_os = "wasi"))]
+#[cfg(not(target_vendor = "browseros"))]
 mod git;
-#[cfg(target_os = "wasi")]
-mod git_wasi;
-#[cfg(target_os = "wasi")]
-mod inotify_wasi;
-#[cfg(target_os = "wasi")]
-pub mod wasi_process;
+#[cfg(target_vendor = "browseros")]
+mod git_cli;
 pub mod plugin;
-#[cfg(not(target_os = "wasi"))]
 pub mod terminal;
-#[cfg(target_os = "wasi")]
-pub mod terminal_wasi;
 pub mod watcher;
 
 use std::{
@@ -170,14 +163,6 @@ pub fn register_lapce_path() -> Result<()> {
     Ok(())
 }
 
-/// WASI（preview1）に Unix ドメインソケットは無い。2 つ目の Lapce は
-/// 前のものへ繋がず、自分で窓を開く
-#[cfg(target_os = "wasi")]
-fn listen_local_socket(_proxy_rpc: ProxyRpcHandler) -> Result<()> {
-    Err(anyhow!("local sockets are not available on WASI"))
-}
-
-#[cfg(not(target_os = "wasi"))]
 fn listen_local_socket(proxy_rpc: ProxyRpcHandler) -> Result<()> {
     let local_socket = Directory::local_socket()
         .ok_or_else(|| anyhow!("can't get local socket folder"))?;
@@ -205,19 +190,19 @@ fn listen_local_socket(proxy_rpc: ProxyRpcHandler) -> Result<()> {
     Ok(())
 }
 
-/// プラグインの取得や更新の確認に使う。WASI 版はまだ HTTP を持たないので、
+/// プラグインの取得や更新の確認に使う。BrowserOS 版は HTTP を持たないので、
 /// 必ず失敗する（→ [`wasi_http::Response`]）
-#[cfg(target_os = "wasi")]
+#[cfg(target_vendor = "browseros")]
 pub fn get_url<T: std::fmt::Display>(
     url: T,
     _user_agent: Option<&str>,
 ) -> Result<wasi_http::Response> {
-    Err(anyhow!("cannot fetch {url} on WASI yet"))
+    Err(anyhow!("cannot fetch {url} in BrowserOS"))
 }
 
 /// reqwest の `Response` のうち、Lapce が使うところだけを持つ型。
 /// **値は作られない**（`get_url` が必ず失敗する）ので、中身は空の enum にしてある
-#[cfg(target_os = "wasi")]
+#[cfg(target_vendor = "browseros")]
 pub mod wasi_http {
     use anyhow::Result;
 
@@ -261,7 +246,10 @@ pub mod wasi_http {
             match self {}
         }
 
-        pub fn copy_to<W: std::io::Write + ?Sized>(&mut self, _out: &mut W) -> Result<u64> {
+        pub fn copy_to<W: std::io::Write + ?Sized>(
+            &mut self,
+            _out: &mut W,
+        ) -> Result<u64> {
             match *self {}
         }
     }
@@ -295,7 +283,7 @@ pub mod wasi_http {
     }
 }
 
-#[cfg(not(target_os = "wasi"))]
+#[cfg(not(target_vendor = "browseros"))]
 pub fn get_url<T: reqwest::IntoUrl + Clone>(
     url: T,
     user_agent: Option<&str>,

@@ -90,8 +90,23 @@ impl TerminalConfig {
 
         let profile = profile.clone();
 
+        // 演習の画面に埋め込んだ端末のタブには、macOS の Terminal と同じく、起こすシェルの名前（`$SHELL` の最後の部分）を付ける
+        #[cfg(target_vendor = "browseros")]
+        let name = profile
+            .command
+            .clone()
+            .or_else(|| std::env::var("SHELL").ok())
+            .and_then(|shell| {
+                std::path::Path::new(&shell)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+            .unwrap_or_else(|| "sh".to_string());
+        #[cfg(not(target_vendor = "browseros"))]
+        let name = std::env::consts::OS.to_string();
+
         Some(lapce_rpc::terminal::TerminalProfile {
-            name: std::env::consts::OS.to_string(),
+            name,
             command: profile.command,
             arguments: profile.arguments,
             workdir,

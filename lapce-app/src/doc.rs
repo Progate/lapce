@@ -1399,26 +1399,51 @@ impl Doc {
     }
 
     pub fn save(&self, after_action: impl FnOnce() + 'static) {
+        self.save_reporting(move |saved| {
+            if saved == Ok(true) {
+                after_action();
+            }
+        });
+    }
+
+    /// Writes the document to its file and reports how it went, also when the write fails, so
+    /// that a caller waiting for the write (→ `CoreRequest::SaveAll`) is always answered.
+    ///
+    /// `on_done` gets `Ok(true)` when the file was written and the document was not edited in the
+    /// meantime (it is pristine now), `Ok(false)` when it was written but edited meanwhile, and
+    /// `Err` with the reason when the file could not be written. A document without a file has
+    /// nothing to write, which counts as written.
+    pub fn save_reporting(
+        &self,
+        on_done: impl FnOnce(Result<bool, String>) + 'static,
+    ) {
         let content = self.content.get_untracked();
-        if let DocContent::File { path, .. } = content {
-            let rev = self.rev();
-            let buffer = self.buffer;
-            let send = create_ext_action(self.scope, move |result| {
-                if let Ok(ProxyResponse::SaveResponse {}) = result {
+        let DocContent::File { path, .. } = content else {
+            on_done(Ok(true));
+            return;
+        };
+        let rev = self.rev();
+        let buffer = self.buffer;
+        let send = create_ext_action(
+            self.scope,
+            move |result: Result<ProxyResponse, lapce_rpc::RpcError>| match result {
+                Ok(ProxyResponse::SaveResponse {}) => {
                     let current_rev = buffer.with_untracked(|buffer| buffer.rev());
                     if current_rev == rev {
                         buffer.update(|buffer| {
                             buffer.set_pristine();
                         });
-                        after_action();
                     }
+                    on_done(Ok(current_rev == rev));
                 }
-            });
+                Ok(_) => on_done(Err("unexpected response to save".to_string())),
+                Err(err) => on_done(Err(err.message)),
+            },
+        );
 
-            self.common.proxy.save(rev, path, true, move |result| {
-                send(result);
-            })
-        }
+        self.common.proxy.save(rev, path, true, move |result| {
+            send(result);
+        })
     }
 
     pub fn set_inline_completion(

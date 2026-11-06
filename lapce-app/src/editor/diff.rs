@@ -22,6 +22,7 @@ use super::{EditorData, EditorViewKind};
 use crate::{
     config::{color::LapceColor, icon::LapceIcons},
     doc::{Doc, DocContent},
+    i18n,
     id::{DiffEditorId, EditorTabId},
     main_split::{Editors, MainSplitData},
     wave::wave_box,
@@ -365,7 +366,7 @@ pub fn diff_show_more_section_view(
                     .size_pct(100.0, 100.0)
                     .color(config.get().color(LapceColor::PANEL_BACKGROUND))
             }),
-            label(move || format!("{} Hidden Lines", section.lines)),
+            label(move || i18n::tf("{} Hidden Lines", &[&section.lines])),
             label(|| "|".to_string()).style(|s| s.margin_left(10.0)),
             stack((
                 svg(move || config.get().ui_svg(LapceIcons::FOLD)).style(move |s| {
@@ -374,7 +375,8 @@ pub fn diff_show_more_section_view(
                     s.size(size, size)
                         .color(config.color(LapceColor::EDITOR_FOREGROUND))
                 }),
-                label(|| "Expand All".to_string()).style(|s| s.margin_left(6.0)),
+                label(|| i18n::t("Expand All").to_string())
+                    .style(|s| s.margin_left(6.0)),
             ))
             .on_event_stop(EventListener::PointerDown, move |_| {})
             .on_click_stop(move |_event| {
@@ -415,7 +417,8 @@ pub fn diff_show_more_section_view(
                             .color(config.color(LapceColor::EDITOR_FOREGROUND))
                     },
                 ),
-                label(|| "Expand Up".to_string()).style(|s| s.margin_left(6.0)),
+                label(|| i18n::t("Expand Up").to_string())
+                    .style(|s| s.margin_left(6.0)),
             ))
             .on_event_stop(EventListener::PointerDown, move |_| {})
             .on_click_stop(move |_event| {
@@ -456,7 +459,8 @@ pub fn diff_show_more_section_view(
                             .color(config.color(LapceColor::EDITOR_FOREGROUND))
                     },
                 ),
-                label(|| "Expand Down".to_string()).style(|s| s.margin_left(6.0)),
+                label(|| i18n::t("Expand Down").to_string())
+                    .style(|s| s.margin_left(6.0)),
             ))
             .on_event_stop(EventListener::PointerDown, move |_| {})
             .on_click_stop(move |_event| {

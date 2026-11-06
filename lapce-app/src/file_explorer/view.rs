@@ -1,7 +1,7 @@
 use std::{path::Path, rc::Rc, sync::Arc};
 
 use floem::{
-    View,
+    AnyView, IntoView, View,
     event::{Event, EventListener},
     kurbo::Rect,
     peniko::Color,
@@ -12,7 +12,7 @@ use floem::{
     text::Style as FontStyle,
     views::{
         Container, Decorators, container, dyn_stack, label, scroll, stack, svg,
-        virtual_stack,
+        text, virtual_stack,
     },
 };
 use lapce_core::selection::Selection;
@@ -28,6 +28,7 @@ use crate::{
     command::InternalCommand,
     config::{LapceConfig, color::LapceColor, icon::LapceIcons},
     editor_tab::{EditorTabChild, EditorTabData},
+    i18n,
     panel::{
         data::PanelSection, kind::PanelKind, position::PanelPosition,
         view::PanelBuilder,
@@ -63,13 +64,33 @@ fn blend_colors(background: Color, foreground: Color) -> Color {
 pub fn file_explorer_panel(
     window_tab_data: Rc<WindowTabData>,
     position: PanelPosition,
-) -> impl View {
+) -> AnyView {
     let config = window_tab_data.common.config;
     let data = window_tab_data.file_explorer.clone();
     let source_control = window_tab_data.source_control.clone();
+    /*
+     * 開いているエディターの一覧を外したときは、ファイルの一覧の節しか残らない。畳めるとファイルの一覧ごと消せてしまうので、
+     * 見出しだけを置いて畳めない形にする（→ lapce_core::embed）
+     */
+    if lapce_core::embed::hides_open_editors() {
+        return stack((
+            text(i18n::t("File Explorer")).style(move |s| {
+                s.selectable(false)
+                    .padding_horiz(10.0)
+                    .padding_vert(6.0)
+                    .width_pct(100.0)
+                    .background(config.get().color(LapceColor::EDITOR_BACKGROUND))
+            }),
+            container(file_explorer_view(data, source_control))
+                .style(|s| s.size_full().flex_grow(1.0).flex_basis(0.0)),
+        ))
+        .style(|s| s.size_full().flex_col())
+        .debug_name("File Explorer Panel")
+        .into_any();
+    }
     PanelBuilder::new(config, position)
         .add_height_style(
-            "Open Editors",
+            i18n::t("Open Editors"),
             150.0,
             container(open_editors_view(window_tab_data.clone()))
                 .style(|s| s.size_full()),
@@ -77,7 +98,7 @@ pub fn file_explorer_panel(
             move |s| s.apply_if(!config.get().ui.open_editors_visible, |s| s.hide()),
         )
         .add(
-            "File Explorer",
+            i18n::t("File Explorer"),
             container(file_explorer_view(data, source_control))
                 .style(|s| s.size_full()),
             window_tab_data
@@ -86,6 +107,7 @@ pub fn file_explorer_panel(
         )
         .build()
         .debug_name("File Explorer Panel")
+        .into_any()
 }
 
 /// Initialize the file explorer's naming (renaming, creating, etc.) editor with the given path.
@@ -531,7 +553,7 @@ fn open_editors_view(window_tab_data: Rc<WindowTabData>) -> impl View {
                 },
                 || false,
                 || false,
-                || "Close",
+                || i18n::t("Close"),
                 config,
             )
             .on_event_stop(EventListener::PointerEnter, move |_| {
@@ -594,7 +616,7 @@ fn open_editors_view(window_tab_data: Rc<WindowTabData>) -> impl View {
             move |(index, (_, editor_tab))| {
                 let plugin = plugin.clone();
                 stack((
-                    label(move || format!("Group {}", index + 1))
+                    label(move || i18n::tf("Group {}", &[&(index + 1)]))
                         .style(|s| s.margin_left(10.0)),
                     dyn_stack(
                         move || editor_tab.get().children,

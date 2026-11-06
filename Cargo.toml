@@ -21,8 +21,8 @@ path = "lapce-proxy/src/bin/lapce-proxy.rs"
 
 [workspace]
 members = ["lapce-app", "lapce-proxy", "lapce-rpc", "lapce-core"]
-# WASI（BrowserOS）で動かすために手を入れた依存。それぞれ自分のワークスペースを持つ（→ wasip1/README.md）
-exclude = ["wasip1/crates"]
+# WASI（BrowserOS）で動かすために手を入れた依存。それぞれ自分のワークスペースを持つ（→ browseros/README.md）
+exclude = ["browseros/crates"]
 
 [workspace.package]
 version      = "0.4.6"
@@ -79,29 +79,34 @@ lapce-rpc   = { path = "./lapce-rpc" }
 lapce-proxy = { path = "./lapce-proxy" }
 
 [workspace.dependencies.floem]
-path = "./wasip1/crates/floem"
+path = "./browseros/crates/floem"
 features = ["editor", "serde", "default-image-formats", "rfd-async-std"]
 
 [workspace.dependencies.floem-editor-core]
-path = "./wasip1/crates/floem/editor-core/"
+path = "./browseros/crates/floem/editor-core/"
 features = ["serde"]
 
 [patch.crates-io]
-# WASI を wasm32-unknown-unknown と同じ「何も無い」扱いにしていて、時刻を読むと panic する
-filetime = { path = "wasip1/crates/filetime" }
-# wasm では nightly の feature が無いと、ロックが競合した時点で panic する（→ wasip1/README.md）
-parking_lot_core = { path = "wasip1/crates/parking_lot_core" }
+# BrowserOS（wasm32-browseros-linux-musl）の型と定数を持つ libc（riscv32 の Linux と同じ並び）
+libc = { git = "https://github.com/Progate/rust-libc", rev = "1d8b649b6e1fe571bada9fc778654887658e1fa2" }
+# wasm は自分のスタックを歩けない（libunwind に _Unwind_Backtrace が無い）ので、Emscripten と同じく何もしない実装にする
+backtrace = { git = "https://github.com/Progate/backtrace-rs", rev = "d61bcefe7a79eabbe1c8578fe0a8f326c71a61d3" }
+# wasm32 を「何も無い」扱いにして置き場を返さない。BrowserOS では Linux と同じ XDG の置き場にする（→ browseros/README.md）
+directories = { path = "browseros/crates/directories" }
+# BrowserOS を riscv32 の Linux と同じに扱う（polling が使う rustix 0.38 の libc の層と、その定数）
+rustix = { git = "https://github.com/Progate/rustix", rev = "84ee69a25083eb459ba53bc91ad4cd4923129dd5" }
+linux-raw-sys = { git = "https://github.com/Progate/linux-raw-sys", rev = "aef24ad212368a284bd06b6f32a975983c2b6ce3" }
 # Temporarily patch lsp-types with a version that adds message-type debug
 lsp-types = { git = "https://github.com/lapce/lsp-types", rev = "feaa1e2ec80975c9dadd400a238ceacf071058e6" }
 regalloc2 = { rev = "5d79e12d0a93b10fc181f4da409b4671dd365228", git = "https://github.com/bytecodealliance/regalloc2" }
 
 # cargo vendor issue: https://github.com/rust-lang/cargo/issues/10310
 # dpi comes from winit (source) and muda (crate)
-dpi = { path = "./wasip1/crates/winit/dpi" }
+dpi = { path = "./browseros/crates/winit/dpi" }
 
 [patch."https://github.com/rust-windowing/winit"]
-winit = { path = "./wasip1/crates/winit" }
-dpi = { path = "./wasip1/crates/winit/dpi" }
+winit = { path = "./browseros/crates/winit" }
+dpi = { path = "./browseros/crates/winit/dpi" }
 
 
 [workspace.dependencies.tracing]
@@ -125,7 +130,7 @@ rev     = "908cc432a5994f6e17c8f36e13c217dc40085704"
 package = "tracing-appender"
 
 [workspace.dependencies.alacritty_terminal]
-path = "./wasip1/crates/alacritty_terminal"
+path = "./browseros/crates/alacritty_terminal"
 
 [workspace.dependencies.windows-sys]
 version  = "0"

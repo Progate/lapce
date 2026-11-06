@@ -29,9 +29,9 @@ use lsp_types::{
 use parking_lot::Mutex;
 use psp_types::{Notification, Request};
 use serde_json::Value;
-#[cfg(not(target_os = "wasi"))]
+#[cfg(not(target_vendor = "browseros"))]
 use wasi_experimental_http_wasmtime::{HttpCtx, HttpState};
-#[cfg(not(target_os = "wasi"))]
+#[cfg(not(target_vendor = "browseros"))]
 use wasmtime_wasi::WasiCtxBuilder;
 
 use super::{
@@ -255,7 +255,9 @@ pub fn load_all_volts(
     let volts = all_volts
         .into_iter()
         .filter_map(|meta| {
-            meta.wasm.as_ref()?;
+            if !runnable(&meta) {
+                return None;
+            }
             let icon = volt_icon(&meta);
             plugin_rpc.core_rpc.volt_installed(meta.clone(), icon);
             if disabled_volts.contains(&meta.id()) {
@@ -269,6 +271,20 @@ pub fn load_all_volts(
     }
 }
 
+/// 起こせるプラグインか。ネイティブ版は wasm を持つものだけで、BrowserOS では言語サーバーの起こし方
+/// （→ [`super::language_server`]）を持つものも
+fn runnable(meta: &VoltMetadata) -> bool {
+    #[cfg(target_vendor = "browseros")]
+    if meta
+        .dir
+        .as_ref()
+        .is_some_and(|dir| dir.join(super::language_server::FILE_NAME).exists())
+    {
+        return true;
+    }
+    meta.wasm.is_some()
+}
+
 /// Find all installed volts.  
 /// `plugin_dev_path` allows launching Lapce with a plugin on your local system for testing
 /// purposes.  
@@ -279,10 +295,15 @@ pub fn find_all_volts(extra_plugin_paths: &[PathBuf]) -> Vec<VoltMetadata> {
         return Vec::new();
     };
 
-    let mut plugins: Vec<VoltMetadata> = plugin_dir
-        .read_dir()
-        .ok()
-        .into_iter()
+    // OS が配るものを後ろに並べる。同じ作者・名前のものは利用者の置き場にあるほうを使う（下の重複の取り除き）
+    #[cfg(target_vendor = "browseros")]
+    let plugin_dirs = [plugin_dir, Directory::system_plugins_directory()];
+    #[cfg(not(target_vendor = "browseros"))]
+    let plugin_dirs = [plugin_dir];
+
+    let mut plugins: Vec<VoltMetadata> = plugin_dirs
+        .iter()
+        .filter_map(|dir| dir.read_dir().ok())
         .flatten()
         .filter_map(|result| {
             let entry = result.ok()?;
@@ -303,6 +324,12 @@ pub fn find_all_volts(extra_plugin_paths: &[PathBuf]) -> Vec<VoltMetadata> {
             }
         })
         .collect();
+
+    #[cfg(target_vendor = "browseros")]
+    {
+        let mut seen = std::collections::HashSet::new();
+        plugins.retain(|meta| seen.insert(meta.id()));
+    }
 
     for plugin_path in extra_plugin_paths {
         let mut metadata = match load_volt(plugin_path) {
@@ -415,19 +442,29 @@ pub fn enable_volt(
     Ok(())
 }
 
-/// プラグインは WASI のモジュールで、ネイティブ版は wasmtime で動かしている。
-/// Lapce 自身が wasm の中に居るときは wasmtime を持ち込めないので、まだ起動できない
-#[cfg(target_os = "wasi")]
+/// プラグインは WASI のモジュールで、ネイティブ版は wasmtime で動かしている。Lapce 自身が wasm の中に居るときは
+/// wasmtime を持ち込めないので、wasm のプラグインは起動できない。
+///
+/// 言語サーバーを起こすだけのプラグインは、wasm の代わりに起こし方（`language-server.toml`）を置けば動く
+/// （→ [`super::language_server`]）。ネイティブ版のプラグインが `startLspServer` で頼むのと同じく、Lapce が
+/// 言語サーバーを子プロセスとして起こして LSP で話す
+#[cfg(target_vendor = "browseros")]
 pub fn start_volt(
-    _workspace: Option<PathBuf>,
-    _configurations: Option<HashMap<String, serde_json::Value>>,
-    _plugin_rpc: PluginCatalogRpcHandler,
+    workspace: Option<PathBuf>,
+    configurations: Option<HashMap<String, serde_json::Value>>,
+    plugin_rpc: PluginCatalogRpcHandler,
     meta: VoltMetadata,
 ) -> Result<()> {
-    Err(anyhow!("plugin {} cannot run on WASI yet", meta.name))
+    if let Some(server) = super::language_server::LanguageServer::of(&meta)? {
+        return server.start(workspace, configurations, plugin_rpc, &meta);
+    }
+    Err(anyhow!(
+        "plugin {} cannot run in BrowserOS: wasm plugins need wasmtime",
+        meta.name
+    ))
 }
 
-#[cfg(not(target_os = "wasi"))]
+#[cfg(not(target_vendor = "browseros"))]
 pub fn start_volt(
     workspace: Option<PathBuf>,
     configurations: Option<HashMap<String, serde_json::Value>>,

@@ -1,6 +1,4 @@
 pub mod about;
-#[cfg(target_os = "wasi")]
-mod open_wasi;
 pub mod alert;
 pub mod app;
 pub mod code_action;
@@ -19,7 +17,9 @@ pub mod focus_text;
 pub mod global_search;
 pub mod history;
 pub mod hover;
+pub mod i18n;
 pub mod id;
+pub mod image_preview;
 pub mod inline_completion;
 pub mod keymap;
 pub mod keypress;
@@ -27,6 +27,8 @@ pub mod listener;
 pub mod lsp;
 pub mod main_split;
 pub mod markdown;
+#[cfg(target_vendor = "browseros")]
+mod open_browseros;
 pub mod palette;
 pub mod panel;
 pub mod plugin;

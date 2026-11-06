@@ -7,5 +7,6 @@ pub type SettingsId = Id;
 pub type KeymapId = Id;
 pub type ThemeColorSettingsId = Id;
 pub type VoltViewId = Id;
+pub type ImageViewId = Id;
 pub type DiffEditorId = Id;
 pub type TerminalTabId = Id;

@@ -18,6 +18,7 @@ use crate::{
     config::{LapceConfig, color::LapceColor, icon::LapceIcons},
     doc::{DiagnosticData, EditorDiagnostic},
     editor::location::{EditorLocation, EditorPosition},
+    i18n,
     listener::Listener,
     lsp::path_from_url,
     window_tab::WindowTabData,
@@ -32,7 +33,7 @@ pub fn problem_panel(
     let is_bottom = position.is_bottom();
     PanelBuilder::new(config, position)
         .add_style(
-            "Errors",
+            i18n::t("Errors"),
             problem_section(window_tab_data.clone(), DiagnosticSeverity::ERROR),
             window_tab_data.panel.section_open(PanelSection::Error),
             move |s| {
@@ -42,7 +43,7 @@ pub fn problem_panel(
             },
         )
         .add(
-            "Warnings",
+            i18n::t("Warnings"),
             problem_section(window_tab_data.clone(), DiagnosticSeverity::WARNING),
             window_tab_data.panel.section_open(PanelSection::Warn),
         )

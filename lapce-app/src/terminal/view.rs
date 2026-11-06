@@ -34,6 +34,7 @@ use crate::{
     config::{LapceConfig, color::LapceColor},
     debug::RunDebugProcess,
     editor::location::{EditorLocation, EditorPosition},
+    i18n,
     listener::Listener,
     panel::kind::PanelKind,
     window_tab::Focus,
@@ -642,7 +643,7 @@ impl View for TerminalView {
         if let Some(error) = self.launch_error.get() {
             let mut text_layout = TextLayout::new();
             text_layout.set_text(
-                &format!("Terminal failed to launch. Error: {error}"),
+                &i18n::tf("Terminal failed to launch. Error: {}", &[&error]),
                 AttrsList::new(
                     attrs.color(config.color(LapceColor::EDITOR_FOREGROUND)),
                 ),
@@ -704,6 +705,28 @@ impl View for TerminalView {
                 &Rect::new(0.0, y, self.size.width, y + line_height),
                 config.color(LapceColor::EDITOR_CURRENT_LINE),
                 0.0,
+            );
+        }
+
+        /*
+         * BrowserOS 版では、焦点のある端末のカーソルの下を IME の候補を出す場所として windowserver へ言う。
+         * 言わないと、ホストの隠し入力は前に焦点を持っていたエディターの場所（無ければ画面の左上）に残り、
+         * 日本語を変換するときの候補が端末から離れた所に出る
+         */
+        if cfg!(target_vendor = "browseros")
+            && self.is_focused
+            && mode == Mode::Terminal
+        {
+            let origin = self.id.layout_rect().origin();
+            let x = content.cursor.point.column.0 as f64 * char_width;
+            let y = (content.cursor.point.line.0 as f64
+                + content.display_offset as f64
+                + 1.0)
+                * line_height;
+            floem::action::set_ime_allowed(true);
+            floem::action::set_ime_cursor_area(
+                Point::new(origin.x + x, origin.y + y),
+                Size::new(800.0, 600.0),
             );
         }
 
