@@ -46,6 +46,10 @@ pub mod watcher;
 
 pub const LOGO: &str = include_str!("../../extra/images/logo.svg");
 const DEFAULT_SETTINGS: &str = include_str!("../../defaults/settings.toml");
+/// BrowserOS 版だけの既定。`DEFAULT_SETTINGS` の上に重ねる
+#[cfg(target_vendor = "browseros")]
+const BROWSEROS_DEFAULT_SETTINGS: &str =
+    include_str!("../../defaults/settings-browseros.toml");
 const DEFAULT_LIGHT_THEME: &str = include_str!("../../defaults/light-theme.toml");
 const DEFAULT_DARK_THEME: &str = include_str!("../../defaults/dark-theme.toml");
 const DEFAULT_ICON_THEME: &str = include_str!("../../defaults/icon-theme.toml");
@@ -264,13 +268,15 @@ impl LapceConfig {
     }
 
     fn default_config() -> config::Config {
-        config::Config::builder()
-            .add_source(config::File::from_str(
-                DEFAULT_SETTINGS,
-                config::FileFormat::Toml,
-            ))
-            .build()
-            .unwrap()
+        let builder = config::Config::builder().add_source(
+            config::File::from_str(DEFAULT_SETTINGS, config::FileFormat::Toml),
+        );
+        #[cfg(target_vendor = "browseros")]
+        let builder = builder.add_source(config::File::from_str(
+            BROWSEROS_DEFAULT_SETTINGS,
+            config::FileFormat::Toml,
+        ));
+        builder.build().unwrap()
     }
 
     fn default_lapce_config() -> LapceConfig {
