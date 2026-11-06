@@ -312,6 +312,10 @@ pub fn status(
                     || i18n::t("Toggle Right Panel"),
                     config,
                 )
+                // BrowserOS 版は帯に左と下の切り替えだけを並べる（右の板はシンボルだけで、コマンドから開ける）
+                .style(|s| {
+                    s.apply_if(cfg!(target_vendor = "browseros"), |s| s.hide())
+                })
             },
         ))
         .style(move |s| {

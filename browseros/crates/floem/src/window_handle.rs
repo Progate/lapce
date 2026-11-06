@@ -11,6 +11,7 @@ use floem_reactive::{with_scope, RwSignal, Scope, SignalGet, SignalUpdate};
 use floem_renderer::gpu_resources::GpuResources;
 use floem_renderer::Renderer;
 use peniko::color::palette;
+use peniko::Color;
 use peniko::kurbo::{Affine, Point, Rect, Size, Vec2};
 use winit::{
     dpi::{LogicalPosition, LogicalSize},
@@ -71,6 +72,8 @@ pub(crate) struct WindowHandle {
     pub(crate) paint_state: PaintState,
     size: RwSignal<Size>,
     theme: Option<Theme>,
+    /// The fill under the views when no theme is applied (→ `WindowConfig::background`)
+    background: Option<Color>,
     pub(crate) profile: Option<Profile>,
     os_theme: Option<winit::window::Theme>,
     is_maximized: bool,
@@ -93,6 +96,7 @@ impl WindowHandle {
         view_fn: impl FnOnce(winit::window::WindowId) -> Box<dyn View> + 'static,
         transparent: bool,
         apply_default_theme: bool,
+        background: Option<Color>,
         font_embolden: f32,
     ) -> Self {
         let scope = Scope::new();
@@ -194,6 +198,7 @@ impl WindowHandle {
             paint_state,
             size,
             theme: apply_default_theme.then(default_theme),
+            background,
             os_theme,
             is_maximized,
             transparent,
@@ -687,6 +692,7 @@ impl WindowHandle {
                 .theme
                 .as_ref()
                 .map(|theme| theme.background)
+                .or(self.background)
                 .unwrap_or(palette::css::WHITE);
             // fill window with default white background if it's not transparent
             cx.fill(
