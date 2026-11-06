@@ -19,6 +19,7 @@ pub mod history;
 pub mod hover;
 pub mod i18n;
 pub mod id;
+pub mod image_preview;
 pub mod inline_completion;
 pub mod keymap;
 pub mod keypress;

@@ -618,6 +618,20 @@ impl FileExplorerData {
 
         menu = menu.separator();
 
+        // SVG のように文字としても開ける画像は、見た目を開く口も出す（→ image_preview.rs）
+        if !is_dir && crate::image_preview::can_preview(&path_a) {
+            let path = path_a.clone();
+            let internal_command = common.internal_command;
+            menu = menu.entry(MenuItem::new(i18n::t("Open Image Preview")).action(
+                move || {
+                    internal_command.send(InternalCommand::OpenImagePreview {
+                        path: path.clone(),
+                    });
+                },
+            ));
+            menu = menu.separator();
+        }
+
         let path = path_a.clone();
         menu = menu.entry(MenuItem::new(i18n::t("Copy Path")).action(move || {
             let mut clipboard = SystemClipboard::new();

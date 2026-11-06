@@ -190,7 +190,11 @@ pub fn img_from_path(image: impl Fn() -> PathBuf + 'static) -> Img {
     img_dynamic(move || image.clone())
 }
 
-pub(crate) fn img_dynamic(image: impl Fn() -> peniko::Image + 'static) -> Img {
+/// A view that displays an already decoded image.
+///
+/// It takes a function that returns the decoded [`Image`](peniko::Image), and redraws when it changes.
+/// Use it to decode the image yourself (for example on another thread) instead of decoding it on every update.
+pub fn img_dynamic(image: impl Fn() -> peniko::Image + 'static) -> Img {
     let id = ViewId::new();
     create_effect(move |_| {
         id.update_state(image());

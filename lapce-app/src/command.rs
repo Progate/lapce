@@ -279,6 +279,10 @@ pub enum LapceWorkbenchCommand {
     #[strum(message = "Open Keyboard Shortcuts File")]
     OpenKeyboardShortcutsFile,
 
+    #[strum(serialize = "open_image_preview")]
+    #[strum(message = "Open Image Preview")]
+    OpenImagePreview,
+
     #[strum(serialize = "open_log_file")]
     #[strum(message = "Open Log File")]
     OpenLogFile,
@@ -796,6 +800,10 @@ pub enum InternalCommand {
     OpenDiffFiles {
         left_path: PathBuf,
         right_path: PathBuf,
+    },
+    /// 画像のタブを開く（→ image_preview.rs）
+    OpenImagePreview {
+        path: PathBuf,
     },
     ExecuteProcess {
         program: String,
