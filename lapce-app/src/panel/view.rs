@@ -545,11 +545,19 @@ fn panel_picker(
     let is_first = position.is_first();
     dyn_stack(
         move || {
-            panel
-                .panels
-                .with(|panels| panels.get(&position).cloned().unwrap_or_default())
+            panel.panels.with(|panels| {
+                panels
+                    .get(&position)
+                    .map(|p| {
+                        p.iter()
+                            .copied()
+                            .filter(PanelKind::is_pickable)
+                            .collect::<im::Vector<_>>()
+                    })
+                    .unwrap_or_default()
+            })
         },
-        |p| *p,
+        |p: &PanelKind| *p,
         move |p| {
             let window_tab_data = window_tab_data.clone();
             let tooltip = match p {
@@ -644,10 +652,12 @@ fn panel_picker(
             .apply_if(
                 panels.with(|p| {
                     p.get(&position)
-                        // BrowserOS 版では、板が 1 つだけなら切り替えるものが無いので並びごと隠す
-                        // （ソース管理を外してファイルの一覧だけにしたとき → lapce_core::embed）
+                        // BrowserOS 版では、絵を出す板が 1 つだけなら切り替えるものが無いので並びごと隠す
+                        // （ソース管理を外してファイルの一覧だけにしたとき → lapce_core::embed、
+                        // 絵を出さない板 → PanelKind::is_pickable）
                         .map(|p| {
-                            p.len() <= usize::from(cfg!(target_vendor = "browseros"))
+                            p.iter().filter(|kind| kind.is_pickable()).count()
+                                <= usize::from(cfg!(target_vendor = "browseros"))
                         })
                         .unwrap_or(true)
                 }),

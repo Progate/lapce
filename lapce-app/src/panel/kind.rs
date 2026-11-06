@@ -78,6 +78,31 @@ impl PanelKind {
         }
     }
 
+    /// 板の切り替えの並び（絵の並び）に絵を出すか。
+    ///
+    /// BrowserOS 版は演習の画面に埋め込むので、下の板の並びには学習者が自分で開く端末と Problems だけを置く。
+    /// 検索・呼び出し階層・参照・実装は、コマンド（検索、参照へ移動など）が結果を映す板として並びに残し、絵だけを出さない。
+    /// 絵を出し直すときは、下のコメントアウトした行を戻す
+    pub fn is_pickable(&self) -> bool {
+        if !cfg!(target_vendor = "browseros") {
+            return true;
+        }
+        match self {
+            PanelKind::Terminal
+            | PanelKind::Problem
+            | PanelKind::FileExplorer
+            | PanelKind::SourceControl
+            | PanelKind::Plugin
+            | PanelKind::Debug
+            | PanelKind::DocumentSymbol => true,
+            // PanelKind::Search => true,
+            // PanelKind::CallHierarchy => true,
+            // PanelKind::References => true,
+            // PanelKind::Implementation => true,
+            _ => false,
+        }
+    }
+
     pub fn default_position(&self) -> PanelPosition {
         match self {
             PanelKind::Terminal => PanelPosition::BottomLeft,
