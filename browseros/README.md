@@ -63,7 +63,7 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
 | crate | 上流 | 変更 |
 | --- | --- | --- |
 | winit | rust-windowing/winit `ee245c56` | `platform_impl/wasi`（windowserver の窓と、貼り付け板の selection の控え） |
-| floem | lapce/floem `31fa8f44` | GPU の代役・tiny-skia へ画素を渡す口・書体の読み込みと代わりの書体の一覧・斜体の無い書体を斜体としても登録・windowserver の貼り付け板を使うクリップボード（copypasta は trait だけ使い、X11・Wayland を引かない） |
+| floem | lapce/floem `31fa8f44` | GPU の代役・tiny-skia へ画素を渡す口・書体の読み込みと代わりの書体の一覧・斜体の無い書体を斜体としても登録・windowserver の貼り付け板を使うクリップボード（copypasta は trait だけ使い、X11・Wayland を引かない）・窓の地の色（`WindowConfig::background`。既定の白が最初のコマに見えないように） |
 | alacritty_terminal | alacritty/alacritty `cacdb5bb` | 端末のシェルを posix_spawn(3) で起こす（`src/tty/unix/spawn_browseros.rs`）。Linux 版の `pre_exec` は fork(2) を要るが、wasm のプロセスは fork で写せない。`POSIX_SPAWN_SETSID` と、pty の従を fd 0 に開く file actions で同じことをする |
 | directories | crates.io 4.0.1 | wasm32 を「何も無い」扱いにして置き場を返さないので、BrowserOS では Linux の XDG の置き場を選ぶ |
 

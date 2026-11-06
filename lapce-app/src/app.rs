@@ -308,6 +308,10 @@ impl AppData {
     fn default_window_config(&self) -> WindowConfig {
         WindowConfig::default()
             .apply_default_theme(false)
+            // 板が自分の地を塗るまでのあいだ（最初のコマ・窓の大きさが変わる途中）に、floem の既定の白が見えないようにする
+            .background(self.config.with_untracked(|config| {
+                config.color(LapceColor::EDITOR_BACKGROUND)
+            }))
             .title("Lapce")
     }
 

@@ -1,4 +1,5 @@
 use peniko::kurbo::{Point, Size};
+use peniko::Color;
 #[cfg(windows)]
 pub use winit::platform::windows::IconExtWindows;
 pub use winit::window::Fullscreen;
@@ -36,6 +37,7 @@ pub struct WindowConfig {
     pub(crate) undecorated_shadow: bool,
     pub(crate) window_level: WindowLevel,
     pub(crate) apply_default_theme: bool,
+    pub(crate) background: Option<Color>,
     pub(crate) font_embolden: f32,
     #[allow(dead_code)]
     pub(crate) mac_os_config: Option<MacOSWindowConfig>,
@@ -63,6 +65,7 @@ impl Default for WindowConfig {
             undecorated_shadow: false,
             window_level: WindowLevel::Normal,
             apply_default_theme: true,
+            background: None,
             font_embolden: if cfg!(target_os = "macos") { 0.2 } else { 0. },
             mac_os_config: None,
             web_config: None,
@@ -201,6 +204,18 @@ impl WindowConfig {
     #[inline]
     pub fn apply_default_theme(mut self, apply_default_theme: bool) -> Self {
         self.apply_default_theme = apply_default_theme;
+        self
+    }
+
+    /// The color the window is filled with before the views are painted, when
+    /// the window is not transparent and no default theme is applied.
+    ///
+    /// Without it the window is filled with white, which shows through until
+    /// the views paint their own backgrounds (on the first frames, or while the
+    /// window is being resized).
+    #[inline]
+    pub fn background(mut self, background: Color) -> Self {
+        self.background = Some(background);
         self
     }
 

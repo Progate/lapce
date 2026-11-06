@@ -324,6 +324,7 @@ impl ApplicationHandle {
             undecorated_shadow,
             window_level,
             apply_default_theme,
+            background,
             mac_os_config,
             web_config,
             font_embolden,
@@ -477,6 +478,7 @@ impl ApplicationHandle {
             view_fn,
             transparent,
             apply_default_theme,
+            background,
             font_embolden,
         );
         self.window_handles.insert(window_id, window_handle);
