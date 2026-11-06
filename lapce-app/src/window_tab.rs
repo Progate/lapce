@@ -887,6 +887,22 @@ impl WindowTabData {
                     );
                 }
             }
+            OpenImagePreview => {
+                // 開いているエディタのファイルの見た目を見る（SVG など。→ image_preview.rs）
+                let path = self.main_split.active_editor.get_untracked().and_then(
+                    |editor| {
+                        editor
+                            .doc()
+                            .content
+                            .with_untracked(|content| content.path().cloned())
+                    },
+                );
+                if let Some(path) =
+                    path.filter(|path| crate::image_preview::can_preview(path))
+                {
+                    self.main_split.open_image_preview(path);
+                }
+            }
             OpenLogFile => {
                 if let Some(dir) = Directory::logs_directory() {
                     self.open_paths(&[PathObject::from_path(
@@ -2012,6 +2028,9 @@ impl WindowTabData {
                 left_path,
                 right_path,
             } => self.main_split.open_diff_files(left_path, right_path),
+            InternalCommand::OpenImagePreview { path } => {
+                self.main_split.open_image_preview(path)
+            }
             InternalCommand::ExecuteProcess { program, arguments } => {
                 let mut cmd = match std::process::Command::new(program)
                     .args(arguments)

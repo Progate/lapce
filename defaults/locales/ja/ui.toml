@@ -96,6 +96,7 @@
 "Move Directory to Trash" = "フォルダーをごみ箱に移動"
 "Move File to Trash" = "ファイルをごみ箱に移動"
 "Copy Path" = "パスのコピー"
+"Could not open the image: {}" = "画像を開けません: {}"
 "Copy Relative Path" = "相対パスをコピー"
 "Select for Compare" = "比較対象の選択"
 "Compare with Selected" = "選択項目と比較"

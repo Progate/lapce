@@ -1343,6 +1343,7 @@ fn editor_tab_content(
     let workspace = common.workspace.clone();
     let editors = main_split.editors;
     let diff_editors = main_split.diff_editors;
+    let docs = main_split.docs;
     let config = common.config;
     let focus = common.focus;
     let items = move || {
@@ -1521,6 +1522,10 @@ fn editor_tab_content(
             EditorTabChild::Keymap(_) => keymap_view(editors, common).into_any(),
             EditorTabChild::Volt(_, id) => {
                 plugin_info_view(plugin.clone(), id).into_any()
+            }
+            EditorTabChild::Image(_, path) => {
+                crate::image_preview::image_preview_view(path, docs, config)
+                    .into_any()
             }
         };
         child.style(|s| s.size_full())

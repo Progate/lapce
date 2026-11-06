@@ -55,6 +55,13 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
 演習の画面に埋め込むための引数（`--read-only`・`--no-title-bar`・`--no-open-editors`・`--no-source-control`）と、
 外から全部保存を頼む `--save-all` も BrowserOS 版にある。
 
+## Lapce に足した機能
+
+- **画像のタブ**（`lapce-app/src/image_preview.rs`）。PNG・JPEG・GIF・WebP・BMP・ICO は開くと画像のタブになり、
+  元の大きさで（入りきらなければ縮めて）描き、形式・寸法・大きさを下に出す。SVG はエディタで開き、
+  エクスプローラーの右クリックかコマンドの `open_image_preview`（画像のプレビューを開く）で画像のタブを出す。
+  エディタでも開いているあいだは、保存を待たずに編集中の文字を描く
+
 ## 手を入れた依存（`browseros/crates/`）
 
 上流の版に BrowserOS のための変更を足したものを置いている。Lapce の `Cargo.toml` はこれを path で指す。
@@ -63,7 +70,7 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
 | crate | 上流 | 変更 |
 | --- | --- | --- |
 | winit | rust-windowing/winit `ee245c56` | `platform_impl/wasi`（windowserver の窓と、貼り付け板の selection の控え） |
-| floem | lapce/floem `31fa8f44` | GPU の代役・tiny-skia へ画素を渡す口・書体の読み込みと代わりの書体の一覧・斜体の無い書体を斜体としても登録・windowserver の貼り付け板を使うクリップボード（copypasta は trait だけ使い、X11・Wayland を引かない）・窓の地の色（`WindowConfig::background`。既定の白が最初のコマに見えないように） |
+| floem | lapce/floem `31fa8f44` | GPU の代役・tiny-skia へ画素を渡す口・書体の読み込みと代わりの書体の一覧・斜体の無い書体を斜体としても登録・windowserver の貼り付け板を使うクリップボード（copypasta は trait だけ使い、X11・Wayland を引かない）・窓の地の色（`WindowConfig::background`。既定の白が最初のコマに見えないように）・復号済みの画像を描く `img_dynamic` の公開・SVG の `<text>` に文字の描画と同じ書体を渡す |
 | alacritty_terminal | alacritty/alacritty `cacdb5bb` | 端末のシェルを posix_spawn(3) で起こす（`src/tty/unix/spawn_browseros.rs`）。Linux 版の `pre_exec` は fork(2) を要るが、wasm のプロセスは fork で写せない。`POSIX_SPAWN_SETSID` と、pty の従を fd 0 に開く file actions で同じことをする |
 | directories | crates.io 4.0.1 | wasm32 を「何も無い」扱いにして置き場を返さないので、BrowserOS では Linux の XDG の置き場を選ぶ |
 

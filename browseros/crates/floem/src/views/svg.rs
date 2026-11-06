@@ -19,6 +19,37 @@ use crate::{
 
 use super::Decorators;
 
+/// SVG の `<text>` を描くための書体の一覧と、書体を指定しない文字の書体の名前。
+///
+/// usvg は文字を書体から形に直して描くので、書体の一覧が空（`Options` の既定）だと文字が消える。
+/// 文字の描画（cosmic-text）がもう読んだ書体の中身を、写さずにそのまま渡す（fontdb の版は違うが、
+/// 中身を持つ型は同じ）。書体の名前の既定（sans-serif など）も合わせ、書体を指定しない文字は
+/// usvg の既定（Times New Roman）ではなく画面の文字と同じ sans-serif で描く
+fn svg_fonts() -> (std::sync::Arc<usvg::fontdb::Database>, String) {
+    use floem_renderer::text::{fontdb, Family, FONT_SYSTEM};
+    use std::sync::{Arc, LazyLock};
+    static FONTS: LazyLock<(Arc<usvg::fontdb::Database>, String)> = LazyLock::new(|| {
+        let font_system = FONT_SYSTEM.lock();
+        let source = font_system.db();
+        let mut db = usvg::fontdb::Database::new();
+        // 1 つのファイル（.ttc）に入った書体は同じ中身を指す。中身ごとに 1 度だけ渡す
+        let mut seen = std::collections::HashSet::new();
+        for face in source.faces() {
+            if let fontdb::Source::Binary(data) = &face.source {
+                if seen.insert(Arc::as_ptr(data) as *const u8) {
+                    db.load_font_source(usvg::fontdb::Source::Binary(data.clone()));
+                }
+            }
+        }
+        db.set_sans_serif_family(source.family_name(&Family::SansSerif));
+        db.set_serif_family(source.family_name(&Family::Serif));
+        db.set_monospace_family(source.family_name(&Family::Monospace));
+        let family = source.family_name(&Family::SansSerif).to_owned();
+        (Arc::new(db), family)
+    });
+    FONTS.clone()
+}
+
 prop!(pub SvgColor: Option<Brush> {} = None);
 
 prop_extractor! {
@@ -166,14 +197,22 @@ impl View for Svg {
                 }
             };
 
-            self.svg_tree = Tree::from_str(
-                text,
-                &usvg::Options {
+            // 書体の一覧は文字を持つ SVG にだけ渡す（アイコンの SVG のたびに一覧を作らない）
+            let options = if text.contains("<text") {
+                let (fontdb, font_family) = svg_fonts();
+                usvg::Options {
+                    style_sheet: style,
+                    fontdb,
+                    font_family,
+                    ..Default::default()
+                }
+            } else {
+                usvg::Options {
                     style_sheet: style,
                     ..Default::default()
-                },
-            )
-            .ok();
+                }
+            };
+            self.svg_tree = Tree::from_str(text, &options).ok();
 
             let mut hasher = Sha256::new();
             hasher.update(text);
