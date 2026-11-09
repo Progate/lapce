@@ -9,18 +9,28 @@ use crate::tracing::*;
 pub(super) fn logging() -> (Handle<Targets>, Option<WorkerGuard>) {
     use tracing_subscriber::{filter, fmt, prelude::*, reload};
 
-    let (log_file, guard) = match Directory::logs_directory()
-        .and_then(|dir| {
-            tracing_appender::rolling::Builder::new()
-                .max_log_files(10)
-                .rotation(tracing_appender::rolling::Rotation::DAILY)
-                .filename_prefix("lapce")
-                .filename_suffix("log")
-                .build(dir)
-                .ok()
-        })
-        .map(tracing_appender::non_blocking)
-    {
+    let appender = Directory::logs_directory().and_then(|dir| {
+        tracing_appender::rolling::Builder::new()
+            .max_log_files(10)
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix("lapce")
+            .filename_suffix("log")
+            .build(dir)
+            .ok()
+    });
+    /*
+     * BrowserOS 版はログをその場で書く。non_blocking は書き出しのスレッドを 1 本ずっと起こしておく（BrowserOS では
+     * スレッド 1 本がワーカー 1 つになり、数 MB を食う）。書く量は少なく、書くのは呼んだスレッドの write 1 回で済む
+     */
+    #[cfg(target_vendor = "browseros")]
+    let (log_file, guard): (Option<tracing_subscriber::fmt::writer::BoxMakeWriter>, Option<WorkerGuard>) = (
+        appender.map(|appender| {
+            tracing_subscriber::fmt::writer::BoxMakeWriter::new(std::sync::Mutex::new(appender))
+        }),
+        None,
+    );
+    #[cfg(not(target_vendor = "browseros"))]
+    let (log_file, guard) = match appender.map(tracing_appender::non_blocking) {
         Some((log_file, guard)) => (Some(log_file), Some(guard)),
         None => (None, None),
     };

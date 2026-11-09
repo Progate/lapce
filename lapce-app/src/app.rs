@@ -11,7 +11,7 @@ use std::{
     sync::{
         Arc,
         atomic::AtomicU64,
-        mpsc::{SyncSender, channel, sync_channel},
+        mpsc::{SyncSender, sync_channel},
     },
 };
 
@@ -21,7 +21,7 @@ use floem::{
     IntoView, View,
     action::show_context_menu,
     event::{Event, EventListener, EventPropagation},
-    ext_event::{create_ext_action, create_signal_from_channel},
+    ext_event::{ExtSender, create_ext_action, create_ext_channel},
     menu::{Menu, MenuItem},
     peniko::{
         Color,
@@ -4058,10 +4058,15 @@ pub fn launch() {
 
     let plugin_paths = Arc::new(cli.plugin_path);
 
-    let (tx, rx) = channel();
     // BrowserOS 版は設定の置き場を見張らず、Lapce が書いたときに読み直す（→ config::watcher の notify_on_write）
     #[cfg(target_vendor = "browseros")]
-    crate::config::watcher::notify_on_write(tx);
+    let config_reload = {
+        let (tx, config_reload) = create_ext_channel();
+        crate::config::watcher::notify_on_write(tx);
+        config_reload
+    };
+    #[cfg(not(target_vendor = "browseros"))]
+    let (tx, rx) = std::sync::mpsc::channel();
     #[cfg(not(target_vendor = "browseros"))]
     let watcher = {
         use anyhow::Context;
@@ -4097,6 +4102,8 @@ pub fn launch() {
         }
         watcher
     };
+    #[cfg(not(target_vendor = "browseros"))]
+    let config_reload = floem::ext_event::create_signal_from_channel(rx);
 
     let windows = scope.create_rw_signal(im::HashMap::new());
     let config = LapceConfig::load(&LapceWorkspace::default(), &[], &plugin_paths);
@@ -4142,7 +4149,7 @@ pub fn launch() {
 
     {
         let app_data = app_data.clone();
-        let notification = create_signal_from_channel(rx);
+        let notification = config_reload;
         create_effect(move |_| {
             if notification.get().is_some() {
                 tracing::debug!("notification reload_config");
@@ -4218,7 +4225,7 @@ pub fn launch() {
     #[cfg(all(feature = "updater", not(target_vendor = "browseros")))]
     {
         let (tx, rx) = sync_channel(1);
-        let notification = create_signal_from_channel(rx);
+        let notification = floem::ext_event::create_signal_from_channel(rx);
         let latest_release = app_data.latest_release;
         create_effect(move |_| {
             if let Some(release) = notification.get() {
@@ -4241,8 +4248,8 @@ pub fn launch() {
     }
 
     if let Some(listen_path) = listen_path {
-        let (tx, rx) = sync_channel(1);
-        let notification = create_signal_from_channel(rx);
+        // 届いた頼みは送り手が直接 UI の側を起こす（受け取りを待つだけのスレッドを置かない → floem の create_ext_channel）
+        let (tx, notification) = create_ext_channel();
         let app_data = app_data.clone();
         create_effect(move |_| match notification.get() {
             Some(RemoteCommand::OpenPaths(paths)) => {
@@ -4458,7 +4465,7 @@ fn prepare_local_socket(local_socket: &Path) -> Result<()> {
 
 fn listen_local_socket(
     local_socket: &Path,
-    tx: SyncSender<RemoteCommand>,
+    tx: ExtSender<RemoteCommand>,
 ) -> Result<()> {
     prepare_local_socket(local_socket)?;
     let socket =
@@ -4474,7 +4481,7 @@ fn listen_local_socket(
 /// Answers the requests of one client of the local socket until it hangs up
 fn serve_local_socket_client(
     stream: LocalSocketStream,
-    tx: SyncSender<RemoteCommand>,
+    tx: ExtSender<RemoteCommand>,
 ) -> Result<()> {
     let mut reader = BufReader::new(stream);
     loop {

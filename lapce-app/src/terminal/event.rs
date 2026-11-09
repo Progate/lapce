@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     sync::{
         Arc,
-        mpsc::{Receiver, Sender},
+        mpsc::Receiver,
     },
     time::Instant,
 };
@@ -26,7 +26,7 @@ pub enum TermEvent {
 
 pub fn terminal_update_process(
     receiver: Receiver<(TermId, TermEvent)>,
-    term_notification_tx: Sender<TermNotification>,
+    term_notification_tx: floem::ext_event::ExtSender<TermNotification>,
 ) {
     let mut terminals = HashMap::new();
     let mut last_redraw = Instant::now();

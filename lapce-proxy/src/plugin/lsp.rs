@@ -208,6 +208,7 @@ impl LspClient {
         let mut process = Self::process(workspace.as_ref(), &server, &args)?;
         let stdin = process.stdin.take().unwrap();
         let stdout = process.stdout.take().unwrap();
+        #[cfg(not(target_vendor = "browseros"))]
         let stderr = process.stderr.take().unwrap();
 
         let mut writer = Box::new(BufWriter::new(stdin));
@@ -278,32 +279,36 @@ impl LspClient {
             }
         });
 
-        let core_rpc = plugin_rpc.core_rpc.clone();
-        let volt_id_closure = volt_id.clone();
-        thread::spawn(move || {
-            let mut reader = Box::new(BufReader::new(stderr));
-            loop {
-                let mut line = String::new();
-                match reader.read_line(&mut line) {
-                    Ok(n) => {
-                        if n == 0 {
+        // 言語サーバーの stderr をログへ送る（BrowserOS 版は読まない → process）
+        #[cfg(not(target_vendor = "browseros"))]
+        {
+            let core_rpc = plugin_rpc.core_rpc.clone();
+            let volt_id_closure = volt_id.clone();
+            thread::spawn(move || {
+                let mut reader = Box::new(BufReader::new(stderr));
+                loop {
+                    let mut line = String::new();
+                    match reader.read_line(&mut line) {
+                        Ok(n) => {
+                            if n == 0 {
+                                return;
+                            }
+                            core_rpc.log(
+                                lapce_rpc::core::LogLevel::Trace,
+                                line.trim_end().to_string(),
+                                Some(format!(
+                                    "lapce_proxy::plugin::lsp::{}::{}::stderr",
+                                    volt_id_closure.author, volt_id_closure.name
+                                )),
+                            );
+                        }
+                        Err(_) => {
                             return;
                         }
-                        core_rpc.log(
-                            lapce_rpc::core::LogLevel::Trace,
-                            line.trim_end().to_string(),
-                            Some(format!(
-                                "lapce_proxy::plugin::lsp::{}::{}::stderr",
-                                volt_id_closure.author, volt_id_closure.name
-                            )),
-                        );
-                    }
-                    Err(_) => {
-                        return;
                     }
                 }
-            }
-        });
+            });
+        }
 
         let host = PluginHostHandler::new(
             workspace.clone(),
@@ -455,10 +460,19 @@ impl LspClient {
 
         #[cfg(target_os = "windows")]
         let process = process.creation_flags(0x08000000);
+        /*
+         * BrowserOS 版は言語サーバーの stderr を読まない。読んだ行は Trace でログへ送るだけで、ログの既定の段（DEBUG）では
+         * 捨てられる。読むスレッドを言語サーバーごとに 1 本ずっと起こしておくことになる（BrowserOS ではスレッド 1 本が
+         * ワーカー 1 つになり、数 MB を食う）
+         */
+        #[cfg(target_vendor = "browseros")]
+        let stderr = Stdio::null();
+        #[cfg(not(target_vendor = "browseros"))]
+        let stderr = Stdio::piped();
         let child = process
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(stderr)
             .spawn()?;
         Ok(child)
     }
