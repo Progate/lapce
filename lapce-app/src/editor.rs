@@ -1825,11 +1825,22 @@ impl EditorData {
             };
             (start_offset, input, char)
         });
-        if !display_if_empty_input && input.is_empty() && char != "." && char != ":"
-        {
-            self.cancel_completion();
-            return;
-        }
+        /*
+         * Typing a character with nothing after it yet (`.` of `obj.`) asks the language servers
+         * with it as the trigger character, and only those that list it in their
+         * `triggerCharacters` answer, like VS Code. Lapce used to open the completion after `.` and
+         * `:` for every language, so the `:` at the end of Python's `def f():` opened it and Enter
+         * picked a candidate instead of breaking the line
+         */
+        let trigger_character = if input.is_empty() && !display_if_empty_input {
+            if char.is_empty() || char.trim().is_empty() {
+                self.cancel_completion();
+                return;
+            }
+            Some(char.clone())
+        } else {
+            None
+        };
 
         if self.common.completion.with_untracked(|completion| {
             completion.status != CompletionStatus::Inactive
@@ -1879,6 +1890,7 @@ impl EditorData {
             completion.path.clone_from(&path);
             completion.offset = start_offset;
             completion.input.clone_from(&input);
+            completion.trigger_character = trigger_character;
             completion.status = CompletionStatus::Started;
             completion.input_items.clear();
             completion.request_id += 1;

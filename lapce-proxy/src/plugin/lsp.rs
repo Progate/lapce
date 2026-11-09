@@ -72,6 +72,10 @@ impl PluginServerHandler for LspClient {
         self.host.method_registered(method)
     }
 
+    fn request_wanted(&mut self, method: &str, params: &Params) -> bool {
+        self.host.request_wanted(method, params)
+    }
+
     fn document_supported(
         &mut self,
         language_id: Option<&str>,

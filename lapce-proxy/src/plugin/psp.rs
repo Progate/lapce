@@ -223,6 +223,11 @@ pub trait PluginServerHandler {
         path: Option<&Path>,
     ) -> bool;
     fn method_registered(&mut self, method: &str) -> bool;
+    /// Whether the server wants this request, beyond being able to answer the method at all
+    /// (→ `PluginHostHandler::request_wanted`)
+    fn request_wanted(&mut self, _method: &str, _params: &Params) -> bool {
+        true
+    }
     fn handle_host_notification(
         &mut self,
         method: String,
@@ -467,6 +472,7 @@ impl PluginServerRpcHandler {
                     if handler
                         .document_supported(language_id.as_deref(), path.as_deref())
                         && handler.method_registered(&method)
+                        && handler.request_wanted(&method, &params)
                     {
                         self.send_server_request(id, &method, params, rh);
                     } else {
@@ -693,6 +699,30 @@ impl PluginHostHandler {
             }
             None => true,
         }
+    }
+
+    /// A completion opened by a trigger character (`context.triggerCharacter`) goes only to the
+    /// servers that list that character in `completionProvider.triggerCharacters`, like VS Code.
+    /// Other servers would answer with every name in scope, right after a `:` that ends a line
+    pub fn request_wanted(&self, method: &str, params: &Params) -> bool {
+        if method != Completion::METHOD {
+            return true;
+        }
+        let Params::Map(params) = params else {
+            return true;
+        };
+        let Some(character) = params
+            .get("context")
+            .and_then(|context| context.get("triggerCharacter"))
+            .and_then(|character| character.as_str())
+        else {
+            return true;
+        };
+        self.server_capabilities
+            .completion_provider
+            .as_ref()
+            .and_then(|provider| provider.trigger_characters.as_ref())
+            .is_some_and(|characters| characters.iter().any(|c| c == character))
     }
 
     pub fn method_registered(&mut self, method: &str) -> bool {

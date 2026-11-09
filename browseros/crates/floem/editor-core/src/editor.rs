@@ -138,6 +138,7 @@ impl Action {
                                 '`' => '`',
                                 _ => matching_char(c).unwrap(),
                             },
+                            false,
                         ));
                         continue;
                     }
@@ -215,7 +216,7 @@ impl Action {
                                     '`' => '`',
                                     _ => matching_char(c).unwrap(),
                                 };
-                                edits_after.push((idx, insert_after));
+                                edits_after.push((idx, insert_after, true));
                             }
                         };
                     }
@@ -242,9 +243,30 @@ impl Action {
 
                 deltas.push((text, delta, inval_lines));
                 // Apply late edits
+                // Where the automatically closed characters land once all the late edits are in: each
+                // one is pushed right by the late edits before it (→ `Buffer::mark_auto_closed`)
+                let mut auto_closed = edits_after
+                    .iter()
+                    .filter(|(_, _, auto_close)| *auto_close)
+                    .map(|(idx, _, _)| selection.regions()[*idx].max())
+                    .collect::<Vec<_>>();
+                let mut late_offsets = edits_after
+                    .iter()
+                    .map(|(idx, content, _)| (selection.regions()[*idx].max(), content.len_utf8()))
+                    .collect::<Vec<_>>();
+                late_offsets.sort();
+                for offset in &mut auto_closed {
+                    let shift: usize = late_offsets
+                        .iter()
+                        .filter(|(late, _)| *late < *offset)
+                        .map(|(_, len)| len)
+                        .sum();
+                    *offset += shift;
+                }
+
                 let edits_after = edits_after
                     .iter()
-                    .map(|(idx, content)| {
+                    .map(|(idx, content, _)| {
                         let region = &selection.regions()[*idx];
                         (
                             Selection::region(region.max(), region.max()),
@@ -262,6 +284,9 @@ impl Action {
                     let (text, delta, inval_lines) =
                         buffer.edit(&edits_after, EditType::InsertChars);
                     deltas.push((text, delta, inval_lines));
+                }
+                for offset in auto_closed {
+                    buffer.mark_auto_closed(offset);
                 }
 
                 // Adjust selection according to previous late edits
@@ -1149,16 +1174,18 @@ impl Action {
                                     "`" => Some('`'),
                                     _ => str_matching_pair(&delete_str),
                                 };
+                                // Delete the closing character too only when it is right after the
+                                // cursor and was inserted automatically, like VS Code's
+                                // `editor.autoClosingDelete: "auto"`. A pair that was already in the
+                                // text, or one with something between, keeps its closing character
                                 if let Some(c) = matching_char {
                                     let offset = selection.max_offset();
-                                    let line = buffer.line_of_offset(offset);
-                                    let line_end = buffer.line_end_offset(line, true);
-                                    let content = buffer.slice_to_cow(offset..line_end).to_string();
-                                    if content.trim().starts_with(&c.to_string()) {
-                                        let index = content.match_indices(c).next().unwrap().0;
+                                    if buffer.char_at_offset(offset) == Some(c)
+                                        && buffer.is_auto_closed(offset)
+                                    {
                                         selection = Selection::region(
                                             selection.min_offset(),
-                                            offset + index + 1,
+                                            offset + c.len_utf8(),
                                         );
                                     }
                                 }
@@ -1592,6 +1619,100 @@ mod test {
         let mut cursor = Cursor::new(CursorMode::Insert(selection), None, None);
         Action::insert(&mut cursor, &mut buffer, "{", &prev_unmatched, true, true);
         assert_eq!("{a bc}\n{e fg}\n", buffer.slice_to_cow(0..buffer.len()));
+    }
+
+    struct NoClipboard;
+
+    impl crate::register::Clipboard for NoClipboard {
+        fn get_string(&mut self) -> Option<String> {
+            None
+        }
+
+        fn put_string(&mut self, _s: impl AsRef<str>) {}
+    }
+
+    fn delete_backward(cursor: &mut Cursor, buffer: &mut Buffer) {
+        Action::do_edit(
+            cursor,
+            buffer,
+            &crate::command::EditCommand::DeleteBackward,
+            &mut NoClipboard,
+            &mut crate::register::Register::default(),
+            crate::editor::EditConf {
+                comment_token: "",
+                modal: false,
+                smart_tab: false,
+                keep_indent: true,
+                auto_indent: false,
+            },
+        );
+    }
+
+    fn text(buffer: &Buffer) -> String {
+        buffer.slice_to_cow(0..buffer.len()).to_string()
+    }
+
+    #[test]
+    fn delete_backward_removes_an_auto_closed_pair() {
+        let mut buffer = Buffer::new("x = \n");
+        let mut cursor = Cursor::new(CursorMode::Insert(Selection::caret(4)), None, None);
+        Action::insert(&mut cursor, &mut buffer, "\"", &prev_unmatched, true, true);
+        assert_eq!("x = \"\"\n", text(&buffer));
+        delete_backward(&mut cursor, &mut buffer);
+        assert_eq!("x = \n", text(&buffer));
+    }
+
+    #[test]
+    fn delete_backward_removes_an_auto_closed_pair_after_typing_inside() {
+        let mut buffer = Buffer::new("f\n");
+        let mut cursor = Cursor::new(CursorMode::Insert(Selection::caret(1)), None, None);
+        Action::insert(&mut cursor, &mut buffer, "(", &prev_unmatched, true, true);
+        Action::insert(&mut cursor, &mut buffer, "a", &prev_unmatched, true, true);
+        assert_eq!("f(a)\n", text(&buffer));
+        delete_backward(&mut cursor, &mut buffer);
+        delete_backward(&mut cursor, &mut buffer);
+        assert_eq!("f\n", text(&buffer));
+    }
+
+    #[test]
+    fn delete_backward_keeps_a_closing_quote_that_was_in_the_text() {
+        let mut buffer = Buffer::new("x = \"\"\n");
+        let mut cursor = Cursor::new(CursorMode::Insert(Selection::caret(5)), None, None);
+        delete_backward(&mut cursor, &mut buffer);
+        assert_eq!("x = \"\n", text(&buffer));
+    }
+
+    #[test]
+    fn delete_backward_keeps_a_closing_quote_after_spaces() {
+        let mut buffer = Buffer::new("x = \"  \"\n");
+        let mut cursor = Cursor::new(CursorMode::Insert(Selection::caret(5)), None, None);
+        delete_backward(&mut cursor, &mut buffer);
+        assert_eq!("x =   \"\n", text(&buffer));
+    }
+
+    #[test]
+    fn delete_backward_keeps_the_pair_without_auto_closing() {
+        let mut buffer = Buffer::new("x = \n");
+        let mut cursor = Cursor::new(CursorMode::Insert(Selection::caret(4)), None, None);
+        Action::insert(&mut cursor, &mut buffer, "\"", &prev_unmatched, false, false);
+        Action::insert(&mut cursor, &mut buffer, "\"", &prev_unmatched, false, false);
+        let mut cursor = Cursor::new(CursorMode::Insert(Selection::caret(5)), None, None);
+        delete_backward(&mut cursor, &mut buffer);
+        assert_eq!("x = \"\n", text(&buffer));
+    }
+
+    #[test]
+    fn auto_closed_pairs_follow_edits_before_them() {
+        let mut buffer = Buffer::new("\n");
+        let mut cursor = Cursor::new(CursorMode::Insert(Selection::caret(0)), None, None);
+        Action::insert(&mut cursor, &mut buffer, "[", &prev_unmatched, true, true);
+        // Type in front of the pair; the closing bracket moves but is still the automatic one
+        let mut front = Cursor::new(CursorMode::Insert(Selection::caret(0)), None, None);
+        Action::insert(&mut front, &mut buffer, "a", &prev_unmatched, true, true);
+        assert_eq!("a[]\n", text(&buffer));
+        let mut cursor = Cursor::new(CursorMode::Insert(Selection::caret(2)), None, None);
+        delete_backward(&mut cursor, &mut buffer);
+        assert_eq!("a\n", text(&buffer));
     }
 
     #[test]

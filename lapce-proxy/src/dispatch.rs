@@ -156,9 +156,15 @@ impl ProxyHandler for Dispatcher {
                 path,
                 input,
                 position,
+                trigger_character,
             } => {
-                self.catalog_rpc
-                    .completion(request_id, &path, input, position);
+                self.catalog_rpc.completion(
+                    request_id,
+                    &path,
+                    input,
+                    position,
+                    trigger_character,
+                );
             }
             SignatureHelp {
                 request_id,
