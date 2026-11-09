@@ -49,6 +49,15 @@ impl WindowState {
         Modifiers { state: self.modifiers, pressed_mods: self.pressed }
     }
 
+    /// 文字を打った打鍵が使い切った Alt・Ctrl を除いた修飾（→ `process_key` の「使い切った修飾」）
+    fn modifiers_without_consumed(&self) -> Modifiers {
+        let mut state = self.modifiers;
+        state.remove(ModifiersState::ALT | ModifiersState::CONTROL);
+        let mut pressed = self.pressed;
+        pressed.remove(ModifiersKeys::LALT | ModifiersKeys::RALT | ModifiersKeys::LCONTROL | ModifiersKeys::RCONTROL);
+        Modifiers { state, pressed_mods: pressed }
+    }
+
     fn update(&mut self, code: KeyCode, pressed: bool) -> bool {
         let before = (self.modifiers, self.pressed);
         let key = match code {
@@ -236,6 +245,16 @@ impl EventLoop {
         let shift = state.modifiers.shift_key();
         let control = state.modifiers.control_key();
         /*
+         * **使い切った修飾。** ホストが文字（`text`）を添えたら、Alt・Ctrl を押していてもその打鍵は文字を打つ
+         * （windowserver の `key` の取り決め）。Mac の Option（Option+¥ は `\`）や Windows の AltGr（Ctrl+Alt として届く。
+         * ドイツ語の配列の AltGr+Q は `@`）がそれで、Alt・Ctrl はその文字を選ぶのに使い切られている。xkb が
+         * 3 段目を選んだ修飾を consumed として外すのと同じく、この打鍵のあいだだけ Alt・Ctrl を外して知らせる。
+         * 外さないと、アプリ（Lapce・floem）は Alt・Ctrl つきのショートカットとみなして文字を捨てる。
+         * 文字を添えられないキー（Option+← など）は Alt のまま届くので、ショートカットはそのまま効く
+         */
+        let consumed = pressed && host_text.is_some() && (control || state.modifiers.alt_key());
+        let control = control && !consumed;
+        /*
          * **記号はホストが添えたものを使う。** キーの番号から文字を作り直すと、配列を知らないので US 配列の文字になり、
          * JIS の Shift+2 が `@` になる。ホストは学習者の配列で決めた記号（Shift は効き、Ctrl・Alt・⌘ は効かない。
          * xkb の keysym と同じ）を添えるので、それを `logical_key` にする。添えられていないときだけ US 配列の表に落とす
@@ -310,6 +329,9 @@ impl EventLoop {
             _ => KeyLocation::Standard,
         };
 
+        if consumed {
+            emit(event::WindowEvent::ModifiersChanged(state.modifiers_without_consumed()));
+        }
         emit(event::WindowEvent::KeyboardInput {
             device_id: None,
             event: event::KeyEvent {
@@ -326,7 +348,7 @@ impl EventLoop {
             },
             is_synthetic: false,
         });
-        if modifiers_changed {
+        if modifiers_changed || consumed {
             emit(event::WindowEvent::ModifiersChanged(state.modifiers()));
         }
     }
@@ -698,6 +720,71 @@ mod tests {
         assert_eq!(home.logical_key, Key::Named(NamedKey::Home));
         let enter = press(&mut state, 96, None, None);
         assert_eq!(enter.logical_key, Key::Named(NamedKey::Enter));
+    }
+
+    /// キーを 1 つ流して、届いた出来事をすべて返す
+    fn press_all(state: &mut WindowState, code: u16, text: Option<&str>, symbol: Option<&str>) -> Vec<event::WindowEvent> {
+        let mut events = Vec::new();
+        EventLoop::process_key(
+            state,
+            KeyState::Down,
+            code,
+            text.map(str::to_owned),
+            symbol.map(str::to_owned),
+            &mut |event| events.push(event),
+        );
+        events
+    }
+
+    /// KeyboardInput の直前に知らせた修飾
+    fn modifiers_at_key(events: &[event::WindowEvent]) -> Option<ModifiersState> {
+        let index = events.iter().position(|event| matches!(event, event::WindowEvent::KeyboardInput { .. }))?;
+        events[..index].iter().rev().find_map(|event| match event {
+            event::WindowEvent::ModifiersChanged(modifiers) => Some(modifiers.state()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn mac_option_yen_types_a_backslash_without_alt() {
+        let mut state = WindowState::default();
+        press(&mut state, 56, None, None);
+        let events = press_all(&mut state, 124, Some("\\"), Some("\\"));
+        assert_eq!(modifiers_at_key(&events), Some(ModifiersState::empty()));
+        let key = events.iter().find_map(|event| match event {
+            event::WindowEvent::KeyboardInput { event, .. } => Some(event.clone()),
+            _ => None,
+        });
+        let key = key.unwrap();
+        assert_eq!(key.logical_key, character("\\"));
+        assert_eq!(key.text.as_deref(), Some("\\"));
+        // 打ち終えたら Alt を押したままに戻す
+        assert!(matches!(events.last(), Some(event::WindowEvent::ModifiersChanged(m)) if m.state() == ModifiersState::ALT));
+    }
+
+    #[test]
+    fn windows_altgr_types_the_character_without_control_and_alt() {
+        let mut state = WindowState::default();
+        press(&mut state, 29, None, None);
+        press(&mut state, 100, None, None);
+        let events = press_all(&mut state, 16, Some("@"), Some("@"));
+        assert_eq!(modifiers_at_key(&events), Some(ModifiersState::empty()));
+        let key = events.iter().find_map(|event| match event {
+            event::WindowEvent::KeyboardInput { event, .. } => Some(event.clone()),
+            _ => None,
+        });
+        assert_eq!(key.unwrap().platform_specific.text_with_all_modifiers.as_deref(), Some("@"));
+    }
+
+    #[test]
+    fn alt_without_text_stays_a_shortcut() {
+        let mut state = WindowState::default();
+        press(&mut state, 56, None, None);
+        // Option+←（文字を添えられない）と Linux の Alt+A（記号だけ）は Alt のまま
+        let left = press_all(&mut state, 105, None, None);
+        assert!(!left.iter().any(|event| matches!(event, event::WindowEvent::ModifiersChanged(_))));
+        let a = press_all(&mut state, 30, None, Some("a"));
+        assert!(!a.iter().any(|event| matches!(event, event::WindowEvent::ModifiersChanged(_))));
     }
 
     #[test]
