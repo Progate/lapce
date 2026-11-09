@@ -15,7 +15,7 @@ use std::{
     },
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use floem::{
     IntoView, View,
@@ -64,7 +64,6 @@ use lapce_rpc::{
     file::PathObject,
 };
 use lsp_types::{CompletionItemKind, MessageType, ShowMessageParams};
-use notify::Watcher;
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::{filter::Targets, reload::Handle};
 
@@ -77,7 +76,6 @@ use crate::{
     },
     config::{
         LapceConfig, color::LapceColor, icon::LapceIcons, ui::TabSeparatorHeight,
-        watcher::ConfigWatcher,
     },
     db::LapceDb,
     debug::RunDebugMode,
@@ -220,6 +218,7 @@ pub struct AppData {
     pub app_terminated: RwSignal<bool>,
     /// The latest release information
     pub latest_release: RwSignal<Arc<Option<ReleaseInfo>>>,
+    #[cfg(not(target_vendor = "browseros"))]
     pub watcher: Arc<lapce_proxy::watcher::RecommendedWatcher>,
     pub tracing_handle: Handle<Targets>,
     pub config: RwSignal<Arc<LapceConfig>>,
@@ -3927,6 +3926,16 @@ pub fn launch() {
     let (reload_handle, _guard) = logging::logging();
     trace!(TraceLevel::INFO, "Starting up Lapce..");
 
+    /*
+     * rayon の大域のスレッドプールは、既定では CPU の数だけスレッドを起こす。BrowserOS ではスレッド 1 本がワーカー
+     * 1 つになり、それぞれ数 MB を食うので、コアの多い PC ほど重くなる。Lapce が rayon で走らせるのは、打鍵ごとの
+     * 構文解析（前の解析は打ち切られる）・検索・差分だけで、並列のループには使っていないので 2 本で足りる
+     */
+    #[cfg(target_vendor = "browseros")]
+    if let Err(err) = rayon::ThreadPoolBuilder::new().num_threads(2).build_global() {
+        tracing::error!("{:?}", err);
+    }
+
     #[cfg(feature = "vendored-fonts")]
     {
         use floem::text::{FONT_SYSTEM, fontdb::Source};
@@ -4050,33 +4059,44 @@ pub fn launch() {
     let plugin_paths = Arc::new(cli.plugin_path);
 
     let (tx, rx) = channel();
-    // proxy と同じ見張り（notify の既定。Linux と BrowserOS では inotify）
-    let mut watcher = <lapce_proxy::watcher::RecommendedWatcher as Watcher>::new(
-        ConfigWatcher::new(tx),
-        notify::Config::default(),
-    )
-    .context("Failed to spawn file watcher")
-    .unwrap();
-    if let Some(path) = LapceConfig::settings_file() {
-        if let Err(err) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
-            tracing::error!("{:?}", err);
+    // BrowserOS 版は設定の置き場を見張らず、Lapce が書いたときに読み直す（→ config::watcher の notify_on_write）
+    #[cfg(target_vendor = "browseros")]
+    crate::config::watcher::notify_on_write(tx);
+    #[cfg(not(target_vendor = "browseros"))]
+    let watcher = {
+        use anyhow::Context;
+        use notify::Watcher;
+
+        use crate::config::watcher::ConfigWatcher;
+        // proxy と同じ見張り（notify の既定。Linux と BrowserOS では inotify）
+        let mut watcher = <lapce_proxy::watcher::RecommendedWatcher as Watcher>::new(
+            ConfigWatcher::new(tx),
+            notify::Config::default(),
+        )
+        .context("Failed to spawn file watcher")
+        .unwrap();
+        if let Some(path) = LapceConfig::settings_file() {
+            if let Err(err) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
+                tracing::error!("{:?}", err);
+            }
         }
-    }
-    if let Some(path) = Directory::themes_directory() {
-        if let Err(err) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
-            tracing::error!("{:?}", err);
+        if let Some(path) = Directory::themes_directory() {
+            if let Err(err) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
+                tracing::error!("{:?}", err);
+            }
         }
-    }
-    if let Some(path) = LapceConfig::keymaps_file() {
-        if let Err(err) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
-            tracing::error!("{:?}", err);
+        if let Some(path) = LapceConfig::keymaps_file() {
+            if let Err(err) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
+                tracing::error!("{:?}", err);
+            }
         }
-    }
-    if let Some(path) = Directory::plugins_directory() {
-        if let Err(err) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
-            tracing::error!("{:?}", err);
+        if let Some(path) = Directory::plugins_directory() {
+            if let Err(err) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
+                tracing::error!("{:?}", err);
+            }
         }
-    }
+        watcher
+    };
 
     let windows = scope.create_rw_signal(im::HashMap::new());
     let config = LapceConfig::load(&LapceWorkspace::default(), &[], &plugin_paths);
@@ -4092,6 +4112,7 @@ pub fn launch() {
         active_window: scope.create_rw_signal(WindowId::from_raw(0)),
         window_scale,
         app_terminated: scope.create_rw_signal(false),
+        #[cfg(not(target_vendor = "browseros"))]
         watcher: Arc::new(watcher),
         latest_release,
         app_command,
@@ -4192,7 +4213,9 @@ pub fn launch() {
             .unwrap();
     }
 
-    #[cfg(feature = "updater")]
+    // 新しい版を 1 時間ごとに見に行くスレッド。BrowserOS の Lapce は OS が配る wasm で自分を差し替えられないので起こさない
+    // （スレッド 1 本がワーカー 1 つになり、数 MB を食う）
+    #[cfg(all(feature = "updater", not(target_vendor = "browseros")))]
     {
         let (tx, rx) = sync_channel(1);
         let notification = create_signal_from_channel(rx);
