@@ -58,6 +58,11 @@ pub struct CompletionData {
     pub active: RwSignal<usize>,
     /// The current input that the user has typed which is being sent for consideration by the LSP
     pub input: String,
+    /// The character typed right before the completion's start when it was opened by typing that
+    /// character with nothing after it yet (`.` of `obj.`). The language servers are asked with it
+    /// as the trigger character, and only those that list it in their `triggerCharacters` answer,
+    /// like VS Code. `None` when the completion was opened by typing a word or asked for explicitly
+    pub trigger_character: Option<String>,
     /// `(Input, CompletionItems)`
     pub input_items: im::HashMap<String, im::Vector<ScoredCompletionItem>>,
     /// The filtered items that are being displayed to the user
@@ -101,6 +106,7 @@ impl CompletionData {
             offset: 0,
             active,
             input: "".to_string(),
+            trigger_character: None,
             input_items: im::HashMap::new(),
             filtered_items: im::Vector::new(),
             layout_rect: Rect::ZERO,
@@ -193,7 +199,20 @@ impl CompletionData {
         let words = self.word_items(&path);
         self.input_items.insert(input.clone(), words);
         self.filter_items();
-        proxy_rpc.completion(self.request_id, path, input, position);
+        // Only the request at the start of the completion (the one for no input) is the one the
+        // trigger character asked for
+        let trigger_character = if input.is_empty() {
+            self.trigger_character.clone()
+        } else {
+            None
+        };
+        proxy_rpc.completion(
+            self.request_id,
+            path,
+            input,
+            position,
+            trigger_character,
+        );
     }
 
     /// Word based suggestions (`editor.word-based-suggestions`): the words of the open documents
@@ -208,6 +227,11 @@ impl CompletionData {
         else {
             return im::Vector::new();
         };
+        // Words are suggested only once a word is being typed, like VS Code. Right after `:` or `.`
+        // every word would match, and Enter would pick one of them instead of breaking the line
+        if self.input.is_empty() {
+            return im::Vector::new();
+        }
         let counts = self.session_word_counts(path, docs);
         let mut words: Vec<(String, usize)> = counts
             .iter()

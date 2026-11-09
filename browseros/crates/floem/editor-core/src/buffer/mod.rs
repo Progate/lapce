@@ -12,7 +12,7 @@ use std::{
 use lapce_xi_rope::{
     multiset::Subset,
     tree::{Node, NodeInfo},
-    Delta, DeltaBuilder, DeltaElement, Interval, Rope, RopeDelta,
+    Delta, DeltaBuilder, DeltaElement, Interval, Rope, RopeDelta, Transformer,
 };
 
 use crate::{
@@ -91,6 +91,12 @@ pub struct Buffer {
 
     indent_style: IndentStyle,
     line_ending: LineEnding,
+
+    /// Offsets of the closing characters (brackets and quotes) inserted automatically when the
+    /// opening one was typed. Backspace deletes a closing character together with its opening one
+    /// only when it is here, like VS Code's `editor.autoClosingDelete: "auto"`. Kept in step with
+    /// every edit, and dropped once the character itself is deleted.
+    auto_closed: Vec<usize>,
 }
 
 impl Display for Buffer {
@@ -140,6 +146,7 @@ impl Buffer {
             last_edit_type: EditType::Other,
             indent_style: IndentStyle::DEFAULT_INDENT,
             line_ending,
+            auto_closed: Vec::new(),
         }
     }
 
@@ -191,6 +198,19 @@ impl Buffer {
 
     pub fn atomic_rev(&self) -> Arc<AtomicU64> {
         self.atomic_rev.clone()
+    }
+
+    /// Remembers that the closing character at `offset` was inserted automatically
+    /// (→ the `auto_closed` field)
+    pub fn mark_auto_closed(&mut self, offset: usize) {
+        if !self.auto_closed.contains(&offset) {
+            self.auto_closed.push(offset);
+        }
+    }
+
+    /// Whether the closing character at `offset` was inserted automatically and is still there
+    pub fn is_auto_closed(&self, offset: usize) -> bool {
+        self.auto_closed.contains(&offset)
     }
 
     pub fn init_content(&mut self, content: Rope) {
@@ -339,6 +359,19 @@ impl Buffer {
         new_deletes_from_union: Subset,
     ) -> InvalLines {
         self.rev_counter += 1;
+
+        if !self.auto_closed.is_empty() {
+            let mut transformer = Transformer::new(delta);
+            self.auto_closed = self
+                .auto_closed
+                .iter()
+                .filter_map(|&offset| {
+                    let start = transformer.transform(offset, true);
+                    let end = transformer.transform(offset + 1, false);
+                    (end == start + 1).then_some(start)
+                })
+                .collect();
+        }
 
         let (iv, newlen) = delta.summary();
         let old_logical_end_line = self.text.line_of_offset(iv.end) + 1;
