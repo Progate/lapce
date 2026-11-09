@@ -56,14 +56,15 @@ impl ConfigWatcher {
 
 /// 設定の置き場のファイルを書いたら読み直しを頼む口（BrowserOS 版だけ使う。→ `config_file_written`）
 #[cfg(target_vendor = "browseros")]
-static WRITTEN: std::sync::OnceLock<std::sync::Mutex<Sender<()>>> =
-    std::sync::OnceLock::new();
+static WRITTEN: std::sync::OnceLock<
+    std::sync::Mutex<floem::ext_event::ExtSender<()>>,
+> = std::sync::OnceLock::new();
 
 /// BrowserOS 版は設定の置き場を見張らない（見張りは notify のスレッドを 1 本ずっと起こしておく。BrowserOS では
 /// スレッド 1 本がワーカー 1 つになり、数 MB を食う）。設定の置き場を書き換えるのは Lapce 自身（設定の画面・
 /// 割り当ての画面・拡大縮小）だけで、ホストは起動の前に書き終えているので、Lapce が書いたときに読み直せば足りる
 #[cfg(target_vendor = "browseros")]
-pub fn notify_on_write(tx: Sender<()>) {
+pub fn notify_on_write(tx: floem::ext_event::ExtSender<()>) {
     let _ = WRITTEN.set(std::sync::Mutex::new(tx));
 }
 

@@ -200,6 +200,52 @@ pub fn create_signal_from_channel<T: Send + 'static>(rx: Receiver<T>) -> ReadSig
     read
 }
 
+/// [`create_ext_channel`] の送り手。どのスレッドからでも送れて、送ると UI の側の信号が次の更新で受け取る
+pub struct ExtSender<T> {
+    data: Arc<Mutex<VecDeque<T>>>,
+    trigger: ExtSendTrigger,
+}
+
+impl<T> Clone for ExtSender<T> {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            trigger: self.trigger,
+        }
+    }
+}
+
+impl<T: Send + 'static> ExtSender<T> {
+    /// 値を送る。受け手（信号）が無くなっていても失敗しない（[`std::sync::mpsc::Sender::send`] と同じ形で返す）
+    pub fn send(&self, value: T) -> Result<(), std::sync::mpsc::SendError<T>> {
+        self.data.lock().push_back(value);
+        EXT_EVENT_HANDLER.add_trigger(self.trigger);
+        Ok(())
+    }
+}
+
+/// 送り手と、送られた値を受け取る信号を作る。[`create_signal_from_channel`] と同じく送られた順に信号へ書くが、
+/// 受け取りのためのスレッドを起こさない（送り手が直接 UI の側を起こす）。BrowserOS ではスレッド 1 本がワーカー 1 つになり
+/// 数 MB を食うので、チャネルごとに待つだけのスレッドを置かない
+pub fn create_ext_channel<T: Send + 'static>() -> (ExtSender<T>, ReadSignal<Option<T>>) {
+    let cx = Scope::new();
+    let trigger = with_scope(cx, ExtSendTrigger::new);
+    let (read, write) = cx.create_signal(None);
+    let data = Arc::new(Mutex::new(VecDeque::new()));
+
+    {
+        let data = data.clone();
+        cx.create_effect(move |_| {
+            trigger.track();
+            while let Some(value) = data.lock().pop_front() {
+                write.set(Some(value));
+            }
+        });
+    }
+
+    (ExtSender { data, trigger }, read)
+}
+
 #[cfg(feature = "tokio")]
 pub fn create_signal_from_tokio_channel<T: Send + 'static>(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<T>,

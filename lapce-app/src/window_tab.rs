@@ -16,7 +16,7 @@ use alacritty_terminal::vte::ansi::Handler;
 use floem::{
     ViewId,
     action::{TimerToken, open_file, remove_overlay},
-    ext_event::{create_ext_action, create_signal_from_channel},
+    ext_event::{ExtSender, create_ext_action, create_ext_channel},
     file::FileDialogOptions,
     keyboard::Modifiers,
     kurbo::Size,
@@ -146,7 +146,7 @@ pub struct CommonData {
     pub lapce_command: Listener<LapceCommand>,
     pub workbench_command: Listener<LapceWorkbenchCommand>,
     pub term_tx: Sender<(TermId, TermEvent)>,
-    pub term_notification_tx: Sender<TermNotification>,
+    pub term_notification_tx: ExtSender<TermNotification>,
     pub proxy: ProxyRpcHandler,
     pub view_id: RwSignal<ViewId>,
     pub ui_line_height: Memo<f64>,
@@ -321,7 +321,8 @@ impl WindowTabData {
         let proxy_status = cx.create_rw_signal(None);
 
         let (term_tx, term_rx) = channel();
-        let (term_notification_tx, term_notification_rx) = channel();
+        // 端末の知らせは送り手が直接 UI の側を起こす（受け取りを待つだけのスレッドを置かない → floem の create_ext_channel）
+        let (term_notification_tx, term_notification) = create_ext_channel();
         {
             let term_notification_tx = term_notification_tx.clone();
             std::thread::Builder::new()
@@ -530,7 +531,7 @@ impl WindowTabData {
         );
 
         {
-            let notification = create_signal_from_channel(term_notification_rx);
+            let notification = term_notification;
             let terminal = terminal.clone();
             cx.create_effect(move |_| {
                 notification.with(|notification| {

@@ -55,6 +55,10 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
 | rayon のスレッドプールは CPU の数だけ | 2 本（`lapce-app/src/app.rs`）。BrowserOS ではスレッド 1 本がワーカー 1 つになり数 MB を食う。rayon で走らせるのは構文解析・検索・差分だけ |
 | 更新の確認のスレッドを起こす | 起こさない（OS が配る wasm で自分を差し替えられない） |
 | 設定の置き場を notify で見張る | 見張らない。Lapce が設定・割り当てのファイルを書いたときに読み直す（`lapce-app/src/config/watcher.rs`）。ホストは起動の前に書き終えている |
+| チャネルの受け取りごとにスレッドを 1 本起こす（floem の `create_signal_from_channel`） | 送り手が直接 UI の側を起こす（floem の `create_ext_channel`）。頼みの受け口・端末・裏の処理からの知らせ・設定の読み直し・パレットの結果 |
+| パレットの絞り込みの専用スレッド | 頼みが来たときだけ rayon で走らせ、最新の頼みだけを処理する（`lapce-app/src/palette.rs`） |
+| ログを書き出しのスレッドで書く（tracing-appender の non_blocking） | その場で書く（`lapce-app/src/app/logging.rs`） |
+| 言語サーバーの stderr を読んでログ（Trace）へ送る | 読まない（`/dev/null`。ログの既定の段では捨てられていた） |
 
 演習の画面に埋め込むための引数（`--read-only`・`--no-title-bar`・`--no-open-editors`・`--no-source-control`）と、
 外から全部保存を頼む `--save-all` も BrowserOS 版にある。

@@ -1,4 +1,3 @@
-use std::sync::mpsc::Sender;
 
 use alacritty_terminal::{
     Term,
@@ -19,7 +18,7 @@ use super::event::TermNotification;
 pub struct EventProxy {
     term_id: TermId,
     proxy: ProxyRpcHandler,
-    term_notification_tx: Sender<TermNotification>,
+    term_notification_tx: floem::ext_event::ExtSender<TermNotification>,
 }
 
 impl EventListener for EventProxy {
@@ -61,7 +60,7 @@ impl RawTerminal {
     pub fn new(
         term_id: TermId,
         proxy: ProxyRpcHandler,
-        term_notification_tx: Sender<TermNotification>,
+        term_notification_tx: floem::ext_event::ExtSender<TermNotification>,
     ) -> Self {
         let config = alacritty_terminal::term::Config {
             semantic_escape_chars: ",│`|\"' ()[]{}<>\t".to_string(),

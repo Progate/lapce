@@ -6,14 +6,13 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
-        mpsc::{Receiver, Sender, TryRecvError, channel},
     },
     time::Instant,
 };
 
 use anyhow::Result;
 use floem::{
-    ext_event::{create_ext_action, create_signal_from_channel},
+    ext_event::{ExtSender, create_ext_action, create_ext_channel},
     keyboard::Modifiers,
     reactive::{
         ReadSignal, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith,
@@ -142,7 +141,9 @@ impl PaletteData {
         let run_id = cx.create_rw_signal(0);
         let run_id_counter = Arc::new(AtomicU64::new(0));
 
-        let (run_tx, run_rx) = channel();
+        // 絞り込みは頼みが来たときだけ rayon で走らせる（→ PaletteFilter）。結果は送り手が直接 UI の側を起こす
+        let (resp_tx, resp) = create_ext_channel();
+        let run_tx = PaletteFilter::new(run_id_counter.clone(), resp_tx);
         {
             let run_id = run_id.read_only();
             let input = input.read_only();
@@ -179,20 +180,9 @@ impl PaletteData {
                 kind
             });
         }
-        let (resp_tx, resp_rx) = channel();
-        {
-            let run_id = run_id_counter.clone();
-            std::thread::Builder::new()
-                .name("PaletteUpdateProcess".to_owned())
-                .spawn(move || {
-                    Self::update_process(run_id, run_rx, resp_tx);
-                })
-                .unwrap();
-        }
         let (filtered_items, set_filtered_items) =
             cx.create_signal(im::Vector::new());
         {
-            let resp = create_signal_from_channel(resp_rx);
             let run_id = run_id.read_only();
             let input = input.read_only();
             cx.create_effect(move |_| {
@@ -1610,61 +1600,76 @@ impl PaletteData {
         }
         Some(filtered_items.into())
     }
+}
 
-    fn update_process(
-        run_id: Arc<AtomicU64>,
-        receiver: Receiver<(u64, String, im::Vector<PaletteItem>, Option<usize>)>,
-        resp_tx: Sender<(u64, String, im::Vector<PaletteItem>, Option<usize>)>,
-    ) {
-        fn receive_batch(
-            receiver: &Receiver<(
-                u64,
-                String,
-                im::Vector<PaletteItem>,
-                Option<usize>,
-            )>,
-        ) -> Result<(u64, String, im::Vector<PaletteItem>, Option<usize>)> {
-            let (mut run_id, mut input, mut items, mut preselect_index) =
-                receiver.recv()?;
-            loop {
-                match receiver.try_recv() {
-                    Ok(update) => {
-                        run_id = update.0;
-                        input = update.1;
-                        items = update.2;
-                        preselect_index = update.3;
-                    }
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => break,
-                }
-            }
-            Ok((run_id, input, items, preselect_index))
+/// パレットの頼み（実行の番号・入力・候補・前もって選ぶ位置）
+type PaletteRequest = (u64, String, im::Vector<PaletteItem>, Option<usize>);
+
+/// パレットの絞り込み。頼みが来たときだけ rayon で走らせ、溜まった頼みは最新の 1 つだけを処理する
+/// （入力を速く打つと前の入力の絞り込みは要らない）。ずっと待つ専用のスレッドを置かない（BrowserOS ではスレッド 1 本が
+/// ワーカー 1 つになり、数 MB を食う）
+#[derive(Clone)]
+struct PaletteFilter {
+    latest: Arc<parking_lot::Mutex<Option<PaletteRequest>>>,
+    running: Arc<std::sync::atomic::AtomicBool>,
+    run_id: Arc<AtomicU64>,
+    resp_tx: ExtSender<PaletteRequest>,
+}
+
+impl PaletteFilter {
+    fn new(run_id: Arc<AtomicU64>, resp_tx: ExtSender<PaletteRequest>) -> Self {
+        Self {
+            latest: Arc::new(parking_lot::Mutex::new(None)),
+            running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            run_id,
+            resp_tx,
         }
+    }
 
+    /// 頼みを置く。走っていなければ rayon で走らせる
+    fn send(
+        &self,
+        request: PaletteRequest,
+    ) -> Result<(), std::sync::mpsc::SendError<PaletteRequest>> {
+        *self.latest.lock() = Some(request);
+        if !self.running.swap(true, Ordering::AcqRel) {
+            let filter = self.clone();
+            rayon::spawn(move || filter.drain());
+        }
+        Ok(())
+    }
+
+    fn drain(&self) {
         let mut matcher =
             nucleo::Matcher::new(nucleo::Config::DEFAULT.match_paths());
         loop {
-            if let Ok((current_run_id, input, items, preselect_index)) =
-                receive_batch(&receiver)
-            {
-                if let Some(filtered_items) = Self::filter_items(
-                    run_id.clone(),
-                    current_run_id,
-                    &input,
-                    items,
-                    &mut matcher,
-                ) {
-                    if let Err(err) = resp_tx.send((
-                        current_run_id,
-                        input,
-                        filtered_items,
-                        preselect_index,
-                    )) {
-                        tracing::error!("{:?}", err);
-                    }
+            let Some((current_run_id, input, items, preselect_index)) =
+                self.latest.lock().take()
+            else {
+                self.running.store(false, Ordering::Release);
+                // 止めると決めたあいだに頼みが置かれていたら、もう 1 度走る
+                if self.latest.lock().is_some()
+                    && !self.running.swap(true, Ordering::AcqRel)
+                {
+                    continue;
                 }
-            } else {
                 return;
+            };
+            if let Some(filtered_items) = PaletteData::filter_items(
+                self.run_id.clone(),
+                current_run_id,
+                &input,
+                items,
+                &mut matcher,
+            ) {
+                if let Err(err) = self.resp_tx.send((
+                    current_run_id,
+                    input,
+                    filtered_items,
+                    preselect_index,
+                )) {
+                    tracing::error!("{:?}", err);
+                }
             }
         }
     }
