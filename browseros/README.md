@@ -10,7 +10,8 @@ windowserver に窓を開いて動かすための変更である。使う側は 
 Unix ドメインソケット（interprocess）・ゴミ箱（trash）・XDG の置き場（directories）・文法の dlopen（libloading）は、
 どれも Linux のものをそのまま使う。
 
-BrowserOS に固有の変更は `#[cfg(target_vendor = "browseros")]` の下にあり、**ネイティブ版の振る舞いは変えていない**。
+BrowserOS に固有の変更は `#[cfg(target_vendor = "browseros")]` の下にある。編集の振る舞いを VS Code に揃えた変更
+（→「編集の振る舞い」）はネイティブ版にも効く。
 
 ## 組み方
 
@@ -62,6 +63,19 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
   エクスプローラーの右クリックかコマンドの `open_image_preview`（画像のプレビューを開く）で画像のタブを出す。
   エディタでも開いているあいだは、保存を待たずに編集中の文字を描く
 
+## 編集の振る舞い
+
+学習者が VS Code と同じつもりで打てるよう、次の 2 つを VS Code に揃えた。
+
+- **補完を開く文字は言語サーバーが決める**（`lapce-app/src/editor.rs` の `update_completion`、
+  `lapce-proxy/src/plugin/psp.rs` の `request_wanted`）。単語の途中でない文字（`.` など）を打つと、その文字を
+  trigger character として言語サーバーへ頼み、`completionProvider.triggerCharacters` に挙げたサーバーだけが答える。
+  単語の候補（`editor.word-based-suggestions`）は単語を打ち始めてから出す。だから Python の `def f():` のように行末を
+  `:` で終えて Enter を押すと、候補ではなく改行が入る
+- **Backspace で対の閉じも消すのは、自動で閉じた直後だけ**（`browseros/crates/floem/editor-core` の
+  `Buffer::mark_auto_closed` と `DeleteBackward`。VS Code の `editor.autoClosingDelete: "auto"`）。元から書いてあった
+  `""` の片方や、間に空白がある対では、打った側の 1 文字だけが消える
+
 ## 手を入れた依存（`browseros/crates/`）
 
 上流の版に BrowserOS のための変更を足したものを置いている。Lapce の `Cargo.toml` はこれを path で指す。
@@ -70,7 +84,7 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
 | crate | 上流 | 変更 |
 | --- | --- | --- |
 | winit | rust-windowing/winit `ee245c56` | `platform_impl/wasi`（windowserver の窓と、貼り付け板の selection の控え） |
-| floem | lapce/floem `31fa8f44` | GPU の代役・tiny-skia へ画素を渡す口・書体の読み込みと代わりの書体の一覧・斜体の無い書体を斜体としても登録・windowserver の貼り付け板を使うクリップボード（copypasta は trait だけ使い、X11・Wayland を引かない）・窓の地の色（`WindowConfig::background`。既定の白が最初のコマに見えないように）・復号済みの画像を描く `img_dynamic` の公開・SVG の `<text>` に文字の描画と同じ書体を渡す |
+| floem | lapce/floem `31fa8f44` | GPU の代役・tiny-skia へ画素を渡す口・書体の読み込みと代わりの書体の一覧・斜体の無い書体を斜体としても登録・windowserver の貼り付け板を使うクリップボード（copypasta は trait だけ使い、X11・Wayland を引かない）・窓の地の色（`WindowConfig::background`。既定の白が最初のコマに見えないように）・復号済みの画像を描く `img_dynamic` の公開・SVG の `<text>` に文字の描画と同じ書体を渡す・Backspace で対の閉じも消すのは自動で閉じたものだけ（→「編集の振る舞い」） |
 | alacritty_terminal | alacritty/alacritty `cacdb5bb` | 端末のシェルを posix_spawn(3) で起こす（`src/tty/unix/spawn_browseros.rs`）。Linux 版の `pre_exec` は fork(2) を要るが、wasm のプロセスは fork で写せない。`POSIX_SPAWN_SETSID` と、pty の従を fd 0 に開く file actions で同じことをする |
 | directories | crates.io 4.0.1 | wasm32 を「何も無い」扱いにして置き場を返さないので、BrowserOS では Linux の XDG の置き場を選ぶ |
 
