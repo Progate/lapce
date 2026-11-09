@@ -52,6 +52,9 @@ BrowserOS の画面を持つのは windowserver というプロセスで、ア�
 | 言語のプラグイン（wasmtime）が言語サーバーを起こす | OS が配るプラグイン（`/usr/share/lapce/plugins`）の `language-server.toml` に書いた言語サーバーを、Lapce が同じ LSP のクライアントで起こす（`lapce-proxy/src/plugin/language_server.rs`）。wasm のプラグインは動かない（wasm の中に wasmtime は置けない） |
 | HTTP（プラグインの取得・更新の確認） | 無し |
 | ほかのアプリで開く（`open`） | 無し（`xdg-open` が居ない） |
+| rayon のスレッドプールは CPU の数だけ | 2 本（`lapce-app/src/app.rs`）。BrowserOS ではスレッド 1 本がワーカー 1 つになり数 MB を食う。rayon で走らせるのは構文解析・検索・差分だけ |
+| 更新の確認のスレッドを起こす | 起こさない（OS が配る wasm で自分を差し替えられない） |
+| 設定の置き場を notify で見張る | 見張らない。Lapce が設定・割り当てのファイルを書いたときに読み直す（`lapce-app/src/config/watcher.rs`）。ホストは起動の前に書き終えている |
 
 演習の画面に埋め込むための引数（`--read-only`・`--no-title-bar`・`--no-open-editors`・`--no-source-control`）と、
 外から全部保存を頼む `--save-all` も BrowserOS 版にある。

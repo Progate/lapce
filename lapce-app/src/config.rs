@@ -1048,6 +1048,7 @@ impl LapceConfig {
         // Store
         let path = Self::settings_file()?;
         std::fs::write(path, main_table.to_string().as_bytes()).ok()?;
+        watcher::config_file_written();
 
         Some(())
     }
@@ -1089,6 +1090,7 @@ impl LapceConfig {
         // Store
         let path = Self::settings_file()?;
         std::fs::write(path, main_table.to_string().as_bytes()).ok()?;
+        watcher::config_file_written();
 
         Some(())
     }
