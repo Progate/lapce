@@ -22,6 +22,8 @@ use crate::{
     command::{InternalCommand, LapceWorkbenchCommand},
     config::{color::LapceColor, icon::LapceIcons},
     debug::RunDebugMode,
+    i18n,
+    keypress::KeyPressFocus,
     listener::Listener,
     terminal::{
         panel::TerminalPanelData, tab::TerminalTabData, view::terminal_view,
@@ -142,7 +144,7 @@ fn terminal_tab_header(window_tab_data: Rc<WindowTabData>) -> impl View {
                                 },
                                 || false,
                                 || false,
-                                || "Close",
+                                || i18n::t("Close"),
                                 config,
                             )
                             .style(|s| s.margin_horiz(6.0)),
@@ -230,7 +232,7 @@ fn terminal_tab_header(window_tab_data: Rc<WindowTabData>) -> impl View {
             },
             || false,
             || false,
-            || "New Terminal",
+            || i18n::t("New Terminal"),
             config,
         ))
         .on_resize(move |rect| {
@@ -288,6 +290,8 @@ fn terminal_tab_split(
         |(_, terminal)| terminal.term_id,
         move |(index, terminal)| {
             let terminal_panel_data = terminal_panel_data.clone();
+            let ime_panel = terminal_panel_data.clone();
+            let ime_terminal = terminal.clone();
             let terminal_scope = terminal.scope;
             container({
                 let terminal_view = terminal_view(
@@ -323,6 +327,32 @@ fn terminal_tab_split(
                             EventPropagation::Stop
                         } else {
                             EventPropagation::Continue
+                        }
+                    })
+                    /*
+                     * IME で確定した文字（日本語など）は、キーではなく確定の出来事で届く。エディターと同じくここで受けて、
+                     * 焦点のある端末へ打ち込む。受けないと、変換して確定した文字がどこにも入らない
+                     */
+                    .on_event(EventListener::ImeCommit, {
+                        let terminal = ime_terminal;
+                        let panel = ime_panel;
+                        move |event| {
+                            let Event::ImeCommit(text) = event else {
+                                return EventPropagation::Continue;
+                            };
+                            let is_focused = matches!(
+                                panel.common.focus.get_untracked(),
+                                Focus::Panel(PanelKind::Terminal)
+                            ) && panel
+                                .active_tab(false)
+                                .and_then(|tab| tab.active_terminal(false))
+                                .map(|active| active.term_id)
+                                == Some(terminal.term_id);
+                            if !is_focused {
+                                return EventPropagation::Continue;
+                            }
+                            terminal.receive_char(text);
+                            EventPropagation::Stop
                         }
                     })
                     .on_cleanup(move || {
@@ -370,13 +400,13 @@ fn tab_secondary_click(
 ) {
     let mut menu = Menu::new("");
     menu = menu
-        .entry(MenuItem::new("Stop").action(move || {
+        .entry(MenuItem::new(i18n::t("Stop")).action(move || {
             internal_command.send(InternalCommand::StopTerminal { term_id });
         }))
-        .entry(MenuItem::new("Restart").action(move || {
+        .entry(MenuItem::new(i18n::t("Restart")).action(move || {
             internal_command.send(InternalCommand::RestartTerminal { term_id });
         }))
-        .entry(MenuItem::new("Clear All").action(move || {
+        .entry(MenuItem::new(i18n::t("Clear All")).action(move || {
             internal_command.send(InternalCommand::ClearTerminalBuffer {
                 view_id,
                 tab_index,

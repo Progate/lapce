@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -46,8 +46,9 @@ use crate::{
     editor_tab::{
         EditorTabChild, EditorTabChildSource, EditorTabData, EditorTabInfo,
     },
+    i18n,
     id::{
-        DiffEditorId, EditorTabId, KeymapId, SettingsId, SplitId,
+        DiffEditorId, EditorTabId, ImageViewId, KeymapId, SettingsId, SplitId,
         ThemeColorSettingsId, VoltViewId,
     },
     keypress::{EventRef, KeyPressData, KeyPressHandle},
@@ -385,6 +386,21 @@ impl Editors {
     ) -> O {
         self.0.with_untracked(f)
     }
+
+    /// Saves every edited document once the window loses focus
+    /// (`editor.autosave-on-focus-change`). The focused editor does not get
+    /// its own focus-lost event in that case, so the window has to do it.
+    pub fn save_on_focus_change(&self) {
+        self.with_editors_untracked(|editors| {
+            let mut docs = HashSet::new();
+            for editor in editors.values() {
+                // Split views share one document; saving it once is enough
+                if docs.insert(Rc::as_ptr(&editor.doc())) {
+                    editor.save_on_focus_change();
+                }
+            }
+        });
+    }
 }
 
 #[derive(Clone)]
@@ -538,6 +554,7 @@ impl MainSplitData {
             EditorTabChild::ThemeColorSettings(_) => None,
             EditorTabChild::Keymap(_) => None,
             EditorTabChild::Volt(_, _) => None,
+            EditorTabChild::Image(_, _) => None,
         }
     }
 
@@ -632,6 +649,15 @@ impl MainSplitData {
                 self.editors,
                 self.common.clone(),
             );
+            // 読み取り専用で開いたワークスペースは、proxy の答え（NewBufferResponse）を待たずに読み取り専用にする。
+            // 答えが着くまでのあいだに打った文字が文書に入ってしまうため
+            if lapce_core::read_only::is_enabled() {
+                doc.content.update(|content| {
+                    if let DocContent::File { read_only, .. } = content {
+                        *read_only = true;
+                    }
+                });
+            }
             let doc = Rc::new(doc);
             self.docs.update(|docs| {
                 docs.insert(path.clone(), doc.clone());
@@ -681,6 +707,15 @@ impl MainSplitData {
             self.common.focus.set(Focus::Workbench);
         }
         let path = location.path.clone();
+        // 文字として編集できない画像は、エディタではなく画像のタブで開く（→ image_preview.rs）
+        if crate::image_preview::opens_as_image(&path) {
+            self.get_editor_tab_child(
+                EditorTabChildSource::Image(path),
+                location.ignore_unconfirmed,
+                location.same_editor_tab,
+            );
+            return;
+        }
         let (doc, new_doc) = self.get_doc(path.clone(), None);
 
         let child = self.get_editor_tab_child(
@@ -871,6 +906,7 @@ impl MainSplitData {
                         EditorTabChild::ThemeColorSettings(_) => true,
                         EditorTabChild::Keymap(_) => true,
                         EditorTabChild::Volt(_, _) => true,
+                        EditorTabChild::Image(_, _) => true,
                     };
 
                     if can_be_selected {
@@ -1036,6 +1072,28 @@ impl MainSplitData {
                         })
                     }
                 }
+                EditorTabChildSource::Image(path) => {
+                    if let Some(index) =
+                        active_editor_tab.with_untracked(|editor_tab| {
+                            editor_tab.children.iter().position(|(_, _, child)| {
+                                matches!(child, EditorTabChild::Image(_, current) if current == path)
+                            })
+                        })
+                    {
+                        Some(index)
+                    } else if ignore_unconfirmed {
+                        None
+                    } else {
+                        active_editor_tab.with_untracked(|editor_tab| {
+                            editor_tab
+                                .get_unconfirmed_editor_tab_child(
+                                    editors,
+                                    &diff_editors,
+                                )
+                                .map(|(i, _)| i)
+                        })
+                    }
+                }
             }
         };
 
@@ -1093,6 +1151,9 @@ impl MainSplitData {
                 EditorTabChildSource::Volt(id) => {
                     EditorTabChild::Volt(VoltViewId::next(), id.to_owned())
                 }
+                EditorTabChildSource::Image(path) => {
+                    EditorTabChild::Image(ImageViewId::next(), path.to_owned())
+                }
                 EditorTabChildSource::DiffEditor { left, right } => {
                     let diff_editor_id = DiffEditorId::next();
                     let diff_editor = DiffEditorData::new(
@@ -1129,6 +1190,7 @@ impl MainSplitData {
                         EditorTabChild::ThemeColorSettings(_) => {}
                         EditorTabChild::Keymap(_) => {}
                         EditorTabChild::Volt(_, _) => {}
+                        EditorTabChild::Image(_, _) => {}
                     }
                     (editor_tab_id, current_child.clone())
                 });
@@ -1169,6 +1231,10 @@ impl MainSplitData {
                 (EditorTabChild::Settings(_), EditorTabChildSource::Settings) => {
                     true
                 }
+                (
+                    EditorTabChild::Image(_, current),
+                    EditorTabChildSource::Image(path),
+                ) => current == path,
                 _ => false,
             };
             if is_same {
@@ -1195,6 +1261,7 @@ impl MainSplitData {
                 EditorTabChild::ThemeColorSettings(_) => {}
                 EditorTabChild::Keymap(_) => {}
                 EditorTabChild::Volt(_, _) => {}
+                EditorTabChild::Image(_, _) => {}
             }
 
             // Now loading the new child
@@ -1269,6 +1336,12 @@ impl MainSplitData {
                                     } else {
                                         false
                                     }
+                                }),
+                            EditorTabChildSource::Image(path) => editor_tab
+                                .children
+                                .iter()
+                                .position(|(_, _, child)| {
+                                    matches!(child, EditorTabChild::Image(_, current) if current == path)
                                 }),
                             EditorTabChildSource::NewFileEditor => None,
                         })
@@ -1573,6 +1646,9 @@ impl MainSplitData {
             EditorTabChild::Keymap(_) => EditorTabChild::Keymap(KeymapId::next()),
             EditorTabChild::Volt(_, id) => {
                 EditorTabChild::Volt(VoltViewId::next(), id.to_owned())
+            }
+            EditorTabChild::Image(_, path) => {
+                EditorTabChild::Image(ImageViewId::next(), path.to_owned())
             }
         };
 
@@ -1916,6 +1992,7 @@ impl MainSplitData {
             EditorTabChild::ThemeColorSettings(_) => None,
             EditorTabChild::Keymap(_) => None,
             EditorTabChild::Volt(_, _) => None,
+            EditorTabChild::Image(_, _) => None,
         }
     }
 
@@ -2027,7 +2104,7 @@ impl MainSplitData {
                             let doc = doc.clone();
                             internal_command.send(InternalCommand::HideAlert);
                             save_as(
-                                FileDialogOptions::new().title("Save File"),
+                                FileDialogOptions::new().title(i18n::t("Save File")),
                                 move |file: Option<FileInfo>| {
                                     let main_split = main_split.clone();
                                     let child = child.clone();
@@ -2056,7 +2133,7 @@ impl MainSplitData {
                             );
                         });
                         Some(AlertButton {
-                            text: "Save".to_string(),
+                            text: i18n::t("Save").to_string(),
                             action: save_action,
                         })
                     }
@@ -2079,7 +2156,7 @@ impl MainSplitData {
                             });
                         });
                         Some(AlertButton {
-                            text: "Save".to_string(),
+                            text: i18n::t("Save").to_string(),
                             action: save_action,
                         })
                     }
@@ -2092,15 +2169,18 @@ impl MainSplitData {
                     self.common
                         .internal_command
                         .send(InternalCommand::ShowAlert {
-                            title: format!(
-                                "Do you want to save the changes you made to {name}?"
+                            title: i18n::tf(
+                                "Do you want to save the changes you made to {}?",
+                                &[&name],
                             ),
-                            msg: "Your changes will be lost if you don't save them."
-                                .to_string(),
+                            msg: i18n::t(
+                                "Your changes will be lost if you don't save them.",
+                            )
+                            .to_string(),
                             buttons: vec![
                                 save_button,
                                 AlertButton {
-                                    text: "Don't Save".to_string(),
+                                    text: i18n::t("Don't Save").to_string(),
                                     action: Rc::new(move || {
                                         internal_command
                                             .send(InternalCommand::HideAlert);
@@ -2154,6 +2234,7 @@ impl MainSplitData {
             EditorTabChild::ThemeColorSettings(_) => {}
             EditorTabChild::Keymap(_) => {}
             EditorTabChild::Volt(_, _) => {}
+            EditorTabChild::Image(_, _) => {}
         }
 
         if editor_tab_children_len == 0 {
@@ -2425,6 +2506,14 @@ impl MainSplitData {
         );
     }
 
+    /// 画像のタブを開く。SVG のように文字としても開けるファイルの見た目を見るのに使う（→ image_preview.rs）
+    pub fn open_image_preview(&self, path: PathBuf) {
+        if self.common.focus.get_untracked() != Focus::Workbench {
+            self.common.focus.set(Focus::Workbench);
+        }
+        self.get_editor_tab_child(EditorTabChildSource::Image(path), true, true);
+    }
+
     pub fn open_keymap(&self) {
         self.get_editor_tab_child(EditorTabChildSource::Keymap, false, false);
     }
@@ -2590,7 +2679,7 @@ impl MainSplitData {
     pub fn save_scratch_doc(&self, doc: Rc<Doc>) {
         let main_split = self.clone();
         save_as(
-            FileDialogOptions::new().title("Save File"),
+            FileDialogOptions::new().title(i18n::t("Save File")),
             move |file: Option<FileInfo>| {
                 if let Some(mut file) = file {
                     main_split.save_as(
@@ -2611,7 +2700,7 @@ impl MainSplitData {
     pub fn save_scratch_doc2(&self, doc: Rc<Doc>) {
         let main_split = self.clone();
         save_as(
-            FileDialogOptions::new().title("Save File"),
+            FileDialogOptions::new().title(i18n::t("Save File")),
             move |file: Option<FileInfo>| {
                 if let Some(mut file) = file {
                     main_split.save_as2(
@@ -2747,6 +2836,7 @@ impl MainSplitData {
             EditorTabChild::ThemeColorSettings(_) => {}
             EditorTabChild::Keymap(_) => {}
             EditorTabChild::Volt(_, _) => {}
+            EditorTabChild::Image(_, _) => {}
         }
         Some(())
     }

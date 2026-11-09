@@ -116,9 +116,22 @@ impl EditorInfo {
         let editors = &data.editors;
         let common = data.common.clone();
         match &self.content {
-            DocContent::File { path, .. } => {
+            DocContent::File { path, read_only } => {
                 let (doc, new_doc) =
                     data.get_doc(path.clone(), self.unsaved.clone());
+                // 覚え書きで読み取り専用と書いた文書は、読み取り専用のまま戻す。`get_doc` は読み取り専用かを
+                // proxy の答え（読めないファイルかどうか）だけで決めるので、戻さないと模範解答などを
+                // 見せるために置いた形でも書き換えられてしまう（→ browser-editor の `editorWorkspaceFiles`）
+                #[cfg(target_vendor = "browseros")]
+                if *read_only {
+                    doc.content.update(|content| {
+                        if let DocContent::File { read_only, .. } = content {
+                            *read_only = true;
+                        }
+                    });
+                }
+                #[cfg(not(target_vendor = "browseros"))]
+                let _ = read_only;
                 let editor = editors.make_from_doc(
                     data.scope,
                     doc,
@@ -1812,11 +1825,22 @@ impl EditorData {
             };
             (start_offset, input, char)
         });
-        if !display_if_empty_input && input.is_empty() && char != "." && char != ":"
-        {
-            self.cancel_completion();
-            return;
-        }
+        /*
+         * Typing a character with nothing after it yet (`.` of `obj.`) asks the language servers
+         * with it as the trigger character, and only those that list it in their
+         * `triggerCharacters` answer, like VS Code. Lapce used to open the completion after `.` and
+         * `:` for every language, so the `:` at the end of Python's `def f():` opened it and Enter
+         * picked a candidate instead of breaking the line
+         */
+        let trigger_character = if input.is_empty() && !display_if_empty_input {
+            if char.is_empty() || char.trim().is_empty() {
+                self.cancel_completion();
+                return;
+            }
+            Some(char.clone())
+        } else {
+            None
+        };
 
         if self.common.completion.with_untracked(|completion| {
             completion.status != CompletionStatus::Inactive
@@ -1866,6 +1890,7 @@ impl EditorData {
             completion.path.clone_from(&path);
             completion.offset = start_offset;
             completion.input.clone_from(&input);
+            completion.trigger_character = trigger_character;
             completion.status = CompletionStatus::Started;
             completion.input_items.clear();
             completion.request_id += 1;
@@ -2314,6 +2339,22 @@ impl EditorData {
 
     fn do_save(&self, after_action: impl FnOnce() + 'static) {
         self.doc().save(after_action);
+    }
+
+    /// Saves the document when focus leaves the editor (`editor.autosave-on-focus-change`).
+    /// A scratch document has no file to save to, so saving it would ask for one;
+    /// it is left alone like the interval autosave does (→ `Doc::check_auto_save`).
+    pub fn save_on_focus_change(&self) {
+        let config = self.common.config.get_untracked();
+        if !config.editor.autosave_on_focus_change {
+            return;
+        }
+        let doc = self.doc();
+        let is_file = matches!(doc.content.get_untracked(), DocContent::File { .. });
+        if !is_file || doc.is_pristine() {
+            return;
+        }
+        self.save(config.editor.format_on_autosave, || {});
     }
 
     pub fn save(
@@ -2987,14 +3028,15 @@ impl EditorData {
         for cmd in cmds {
             if let Some(cmd) = cmd {
                 menu = menu.entry(
-                    MenuItem::new(cmd.desc().unwrap_or_else(|| cmd.str())).action(
-                        move || {
-                            lapce_command.send(LapceCommand {
-                                kind: cmd.clone(),
-                                data: None,
-                            })
-                        },
-                    ),
+                    MenuItem::new(
+                        cmd.title().unwrap_or_else(|| cmd.str().to_string()),
+                    )
+                    .action(move || {
+                        lapce_command.send(LapceCommand {
+                            kind: cmd.clone(),
+                            data: None,
+                        })
+                    }),
                 );
             } else {
                 menu = menu.separator();

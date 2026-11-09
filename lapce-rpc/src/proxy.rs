@@ -247,6 +247,8 @@ pub enum ProxyNotification {
         path: PathBuf,
         input: String,
         position: Position,
+        /// The character that opened the completion (→ `CompletionContext::trigger_character`)
+        trigger_character: Option<String>,
     },
     SignatureHelp {
         request_id: usize,
@@ -661,12 +663,14 @@ impl ProxyRpcHandler {
         path: PathBuf,
         input: String,
         position: Position,
+        trigger_character: Option<String>,
     ) {
         self.notification(ProxyNotification::Completion {
             request_id,
             path,
             input,
             position,
+            trigger_character,
         });
     }
 

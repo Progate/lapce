@@ -61,6 +61,7 @@ use crate::{
     debug::{DapData, LapceBreakpoint},
     doc::DocContent,
     editor::gutter::FoldingDisplayItem,
+    i18n,
     text_input::TextInputBuilder,
     window_tab::{CommonData, Focus, WindowTabData},
     workspace::LapceWorkspace,
@@ -2110,6 +2111,7 @@ fn editor_content(
             })
             .on_event_cont(EventListener::FocusLost, move |_| {
                 editor2.editor_view_focus_lost.notify();
+                e_data.get_untracked().save_on_focus_change();
             })
             .on_event_cont(EventListener::PointerDown, move |event| {
                 if let Event::PointerDown(pointer_event) = event {
@@ -2239,7 +2241,7 @@ fn search_editor_view(
             },
             move || case_matching.get() == CaseMatching::Exact,
             || false,
-            || "Case Sensitive",
+            || i18n::t("Case Sensitive"),
             config,
         )
         .style(|s| s.padding_vert(4.0)),
@@ -2252,7 +2254,7 @@ fn search_editor_view(
             },
             move || whole_word.get(),
             || false,
-            || "Whole Word",
+            || i18n::t("Whole Word"),
             config,
         )
         .style(|s| s.padding_left(6.0)),
@@ -2265,7 +2267,7 @@ fn search_editor_view(
             },
             move || is_regex.get(),
             || false,
-            || "Use Regex",
+            || i18n::t("Use Regex"),
             config,
         )
         .style(|s| s.padding_horiz(6.0)),
@@ -2373,7 +2375,7 @@ fn find_view(
                     },
                     move || false,
                     || false,
-                    || "Toggle Replace",
+                    || i18n::t("Toggle Replace"),
                     config,
                 )
                 .style(|s| s.padding_horiz(6.0)),
@@ -2386,9 +2388,9 @@ fn find_view(
                 label(move || {
                     let (current, all) = find_pos.get();
                     if all == 0 {
-                        "No Results".to_string()
+                        i18n::t("No Results").to_string()
                     } else {
-                        format!("{current} of {all}")
+                        i18n::tf("{} of {}", &[&current, &all])
                     }
                 })
                 .style(|s| s.margin_left(6.0).min_width(70.0)),
@@ -2399,7 +2401,7 @@ fn find_view(
                     },
                     move || false,
                     || false,
-                    || "Previous Match",
+                    || i18n::t("Previous Match"),
                     config,
                 )
                 .style(|s| s.padding_left(6.0)),
@@ -2410,7 +2412,7 @@ fn find_view(
                     },
                     move || false,
                     || false,
-                    || "Next Match",
+                    || i18n::t("Next Match"),
                     config,
                 )
                 .style(|s| s.padding_left(6.0)),
@@ -2421,7 +2423,7 @@ fn find_view(
                     },
                     move || false,
                     || false,
-                    || "Close",
+                    || i18n::t("Close"),
                     config,
                 )
                 .style(|s| s.padding_horiz(6.0)),
@@ -2451,7 +2453,7 @@ fn find_view(
                     },
                     move || false,
                     || false,
-                    || "Replace Next",
+                    || i18n::t("Replace Next"),
                     config,
                 )
                 .style(|s| s.padding_left(6.0)),
@@ -2466,7 +2468,7 @@ fn find_view(
                     },
                     move || false,
                     || false,
-                    || "Replace All",
+                    || i18n::t("Replace All"),
                     config,
                 )
                 .style(|s| s.padding_left(6.0)),

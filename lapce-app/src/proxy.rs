@@ -5,7 +5,10 @@ use std::{
     sync::{Arc, mpsc::Sender},
 };
 
-use floem::{ext_event::create_signal_from_channel, reactive::ReadSignal};
+use floem::{
+    ext_event::{ExtSender, create_ext_channel},
+    reactive::ReadSignal,
+};
 use lapce_proxy::dispatch::Dispatcher;
 use lapce_rpc::{
     core::{CoreHandler, CoreNotification, CoreRpcHandler},
@@ -27,7 +30,7 @@ mod ssh;
 mod wsl;
 
 pub struct Proxy {
-    pub tx: Sender<CoreNotification>,
+    pub tx: ExtSender<CoreNotification>,
     pub term_tx: Sender<(TermId, TermEvent)>,
 }
 
@@ -112,7 +115,8 @@ pub fn new_proxy(
             .unwrap();
     }
 
-    let (tx, rx) = std::sync::mpsc::channel();
+    // 裏の処理からの知らせは送り手が直接 UI の側を起こす（受け取りを待つだけのスレッドを置かない → floem の create_ext_channel）
+    let (tx, notification) = create_ext_channel();
     {
         let core_rpc = core_rpc.clone();
         std::thread::Builder::new()
@@ -127,7 +131,6 @@ pub fn new_proxy(
             .unwrap()
     };
 
-    let notification = create_signal_from_channel(rx);
 
     ProxyData {
         proxy_rpc,

@@ -33,6 +33,7 @@ use super::{
 use crate::{
     command::{CommandExecuted, CommandKind, InternalCommand},
     debug::{RunDebugMode, RunDebugProcess},
+    i18n,
     keypress::{KeyPressFocus, condition::Condition},
     window_tab::CommonData,
     workspace::LapceWorkspace,
@@ -398,8 +399,9 @@ impl TerminalData {
                 .as_ref()
                 .map(|r| r.config.name.as_str())
                 .unwrap_or("Unknown");
-            launch_error.set(Some(format!(
-                "Failed to expand variables in run debug definition {r_name}: {e}"
+            launch_error.set(Some(i18n::tf(
+                "Failed to expand variables in run debug definition {}: {}",
+                &[&r_name, &e],
             )));
             None
         });

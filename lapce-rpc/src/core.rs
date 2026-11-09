@@ -148,13 +148,22 @@ pub enum CoreNotification {
     },
 }
 
+/// Requests to a running Lapce from outside, over its local socket (→ `lapce --save-all`)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CoreRequest {}
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "method", content = "params")]
+pub enum CoreRequest {
+    /// Write every modified document to its file, and answer once all the writes are done
+    SaveAll {},
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "method", content = "params")]
-pub enum CoreResponse {}
+pub enum CoreResponse {
+    /// The files that could not be written (empty when all were saved)
+    SaveAll { failed: Vec<PathBuf> },
+}
 
 pub type CoreMessage = RpcMessage<CoreRequest, CoreNotification, CoreResponse>;
 

@@ -33,6 +33,7 @@ use crate::{
         editor::EditorConfig, icon::LapceIcons, terminal::TerminalConfig,
         ui::UIConfig,
     },
+    i18n,
     keypress::KeyPressFocus,
     main_split::Editors,
     plugin::InstalledVoltData,
@@ -183,8 +184,10 @@ impl SettingsData {
                 ),
             ] {
                 let pos = cx.create_rw_signal(Point::new(0.0, item_height_accum));
+                // 見出しと区分の一覧は区分の名前を出すだけなので、画面の言語で出す
+                let shown_kind = i18n::t_dynamic(kind);
                 data_items.push_back(SettingsItem {
-                    kind: kind.to_string(),
+                    kind: shown_kind.clone(),
                     name: "".to_string(),
                     field: "".to_string(),
                     filter_text: "".to_string(),
@@ -195,7 +198,7 @@ impl SettingsData {
                     size: cx.create_rw_signal(Size::ZERO),
                     header: true,
                 });
-                data_kinds.push_back((kind.to_string(), pos));
+                data_kinds.push_back((shown_kind.clone(), pos));
                 for (name, desc) in fields.iter().zip(descs.iter()) {
                     let field = name.replace('_', "-");
 
@@ -212,12 +215,16 @@ impl SettingsData {
                         (SettingsValue::from(value.clone()), value)
                     };
 
-                    let name = format!(
-                        "{kind}: {}",
-                        name.replace('_', " ").to_title_case()
-                    );
+                    let english_name = name.replace('_', " ").to_title_case();
+                    let shown_name = i18n::t_dynamic(&english_name);
+                    let shown_desc = i18n::t_dynamic(desc);
+                    // 設定ファイルや説明書は英語の名前で書くので、英語の名前でも検索で見つかるようにする
+                    let filter_text = format!(
+                        "{kind} {english_name} {desc} {shown_kind} {shown_name} {shown_desc}"
+                    )
+                    .to_lowercase();
+                    let name = format!("{shown_kind}: {shown_name}");
                     let kind = kind.to_lowercase();
-                    let filter_text = format!("{kind} {name} {desc}").to_lowercase();
                     let filter_text =
                         format!("{filter_text}{}", filter_text.replace(' ', ""));
                     data_items.push_back(SettingsItem {
@@ -225,7 +232,7 @@ impl SettingsData {
                         name,
                         field,
                         filter_text,
-                        description: desc.to_string(),
+                        description: shown_desc,
                         value,
                         pos: cx.create_rw_signal(Point::ZERO),
                         size: cx.create_rw_signal(Size::ZERO),
@@ -440,7 +447,7 @@ pub fn settings_view(
             .style(|s| s.flex_col().width_pct(100.0)),
             stack((
                 switcher_item(
-                    "Plugin Settings".to_string(),
+                    i18n::t("Plugin Settings").to_string(),
                     Box::new(move || {
                         plugin_kinds
                             .with_untracked(|k| k.get(0).map(|(_, pos)| *pos))
@@ -488,7 +495,7 @@ pub fn settings_view(
             container({
                 TextInputBuilder::new()
                     .build_editor(search_editor)
-                    .placeholder(|| "Search Settings".to_string())
+                    .placeholder(|| i18n::t("Search Settings").to_string())
                     .keyboard_navigable()
                     .style(move |s| {
                         s.width_pct(100.0)
@@ -977,7 +984,7 @@ fn color_section_list(
                         let key = key.clone();
                         let local_key = key.clone();
                         let local_kind = kind.clone();
-                        text("Reset")
+                        text(i18n::t("Reset"))
                             .on_click_stop(move |_| {
                                 LapceConfig::reset_setting(
                                     &format!("color-theme.{local_kind}"),
@@ -1089,7 +1096,7 @@ pub fn theme_color_settings_view(
             container({
                 TextInputBuilder::new()
                     .build_editor(search_editor)
-                    .placeholder(|| "Search Settings".to_string())
+                    .placeholder(|| i18n::t("Search Settings").to_string())
                     .keyboard_navigable()
                     .style(move |s| {
                         s.width_pct(100.0)
@@ -1104,7 +1111,7 @@ pub fn theme_color_settings_view(
             .style(|s| s.padding_vert(20.0).padding_horiz(20.0)),
             color_section_list(
                 "base",
-                "Base Colors",
+                i18n::t("Base Colors"),
                 move || {
                     let filter = buffer.get().text().to_string();
                     config.with(|c| {
@@ -1129,7 +1136,7 @@ pub fn theme_color_settings_view(
             ),
             color_section_list(
                 "syntax",
-                "Syntax Colors",
+                i18n::t("Syntax Colors"),
                 move || {
                     let filter = buffer.get().text().to_string();
                     config.with(|c| {
@@ -1153,7 +1160,7 @@ pub fn theme_color_settings_view(
             ),
             color_section_list(
                 "ui",
-                "UI Colors",
+                i18n::t("UI Colors"),
                 move || {
                     let filter = buffer.get().text().to_string();
                     config.with(|c| {
@@ -1225,8 +1232,9 @@ fn dropdown_view(
         });
     }
 
+    let shown = dropdown.to_owned();
     stack((
-        label(move || current_value.get()).style(move |s| {
+        label(move || shown.label_of(&current_value.get())).style(move |s| {
             s.text_ellipsis()
                 .width_pct(100.0)
                 .padding_horiz(10.0)
@@ -1306,10 +1314,11 @@ fn dropdown_scroll(
 
     let kind = item.kind.clone();
     let field = item.field.clone();
+    let shown = dropdown.to_owned();
     let view_fn = move |item_string: String| {
         let kind = kind.clone();
         let field = field.clone();
-        let local_item_string = item_string.clone();
+        let local_item_string = shown.label_of(&item_string);
         label(move || local_item_string.clone())
             .on_click_stop(move |_| {
                 current_value.set(item_string.clone());
@@ -1397,4 +1406,44 @@ fn dropdown_scroll(
             .inset_left(x)
             .inset_top(y)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::{Language, set_language, t_dynamic};
+
+    // 設定の項目を足したときに訳を足し忘れると、設定の画面にその項目だけ英語が混ざる
+    #[test]
+    fn every_setting_has_a_japanese_name_and_description() {
+        set_language(Language::Japanese);
+        let mut missing = Vec::new();
+        for (kind, fields, descs) in [
+            ("Core", &CoreConfig::FIELDS[..], &CoreConfig::DESCS[..]),
+            (
+                "Editor",
+                &EditorConfig::FIELDS[..],
+                &EditorConfig::DESCS[..],
+            ),
+            ("UI", &UIConfig::FIELDS[..], &UIConfig::DESCS[..]),
+            (
+                "Terminal",
+                &TerminalConfig::FIELDS[..],
+                &TerminalConfig::DESCS[..],
+            ),
+        ] {
+            let name_of = |field: &str| field.replace('_', " ").to_title_case();
+            let texts = std::iter::once(kind.to_string())
+                .chain(fields.iter().map(|field| name_of(field)))
+                .chain(descs.iter().map(|desc| desc.to_string()));
+            for text in texts {
+                // UI は日本語でも UI と書く
+                if text != "UI" && t_dynamic(&text) == text {
+                    missing.push(text);
+                }
+            }
+        }
+        set_language(Language::English);
+        assert!(missing.is_empty(), "no Japanese for: {missing:#?}");
+    }
 }

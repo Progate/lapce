@@ -47,7 +47,15 @@ pub fn default_panel_order() -> PanelOrder {
         im::vector![PanelKind::DocumentSymbol,],
     );
 
+    retain_available_panels(&mut order);
     order
+}
+
+/// 働かない板（→ `PanelKind::is_available`）を並びから外す。板の無くなった場所は絵の並びごと隠れる
+pub fn retain_available_panels(order: &mut PanelOrder) {
+    for (_, panels) in order.iter_mut() {
+        panels.retain(|kind| kind.is_available());
+    }
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, Hash, PartialEq, Eq)]
@@ -124,7 +132,9 @@ impl PanelData {
             PanelPosition::BottomLeft,
             PanelStyle {
                 active: 0,
-                shown: true,
+                // 読み取り専用のときは下に端末を置かない（→ PanelKind::is_available）。残る検索だけを開いておくと、
+                // 見せたいコードの下に空の検索の板が居座るので、閉じておく
+                shown: !lapce_core::read_only::is_enabled(),
                 maximized: false,
             },
         );

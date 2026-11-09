@@ -370,13 +370,14 @@ impl LapceDb {
         let mut panel_orders: PanelOrder = serde_json::from_str(&panel_orders)?;
 
         use strum::IntoEnumIterator;
-        for kind in PanelKind::iter() {
+        for kind in PanelKind::iter().filter(|kind| kind.is_available()) {
             if kind.position(&panel_orders).is_none() {
                 let panels =
                     panel_orders.entry(kind.default_position()).or_default();
                 panels.push_back(kind);
             }
         }
+        crate::panel::data::retain_available_panels(&mut panel_orders);
 
         Ok(panel_orders)
     }

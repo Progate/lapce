@@ -1,8 +1,5 @@
 use std::path::PathBuf;
 
-#[cfg(target_os = "wasi")]
-use crate::xdg::{BaseDirs, ProjectDirs};
-#[cfg(not(target_os = "wasi"))]
 use directories::{BaseDirs, ProjectDirs};
 
 use crate::meta::NAME;
@@ -176,6 +173,29 @@ impl Directory {
         } else {
             None
         }
+    }
+
+    /// OS が配る文法の置き場（BrowserOS）。ネイティブ版は文法を取ってきて `grammars_directory` に置くが、
+    /// BrowserOS の中からは取りに行けないので、OS のパッケージ（@progate/browser-editor）がここに並べる。
+    /// 利用者の置き場（`grammars_directory`）にあるものが先に使われる
+    #[cfg(target_vendor = "browseros")]
+    pub fn system_grammars_directory() -> PathBuf {
+        PathBuf::from("/usr/lib/lapce/grammars")
+    }
+
+    /// OS が配るハイライトの定義の置き場（BrowserOS）。`system_grammars_directory` と対になる。
+    /// 利用者の置き場（`queries_directory`）にあるものが先に使われる
+    #[cfg(target_vendor = "browseros")]
+    pub fn system_queries_directory() -> PathBuf {
+        PathBuf::from("/usr/share/lapce/queries")
+    }
+
+    /// OS が配るプラグインの置き場（BrowserOS）。BrowserOS の中からはプラグインを取りに行けないので、OS のパッケージ
+    /// （言語サーバーを配るものなど）がここに並べる。利用者の置き場（`plugins_directory`）に同じ作者・名前のものがあれば
+    /// そちらが使われる
+    #[cfg(target_vendor = "browseros")]
+    pub fn system_plugins_directory() -> PathBuf {
+        PathBuf::from("/usr/share/lapce/plugins")
     }
 
     pub fn grammars_directory() -> Option<PathBuf> {

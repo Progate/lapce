@@ -1,5 +1,7 @@
 pub mod catalog;
 pub mod dap;
+#[cfg(target_vendor = "browseros")]
+pub mod language_server;
 pub mod lsp;
 pub mod psp;
 pub mod wasi;
@@ -1121,9 +1123,17 @@ impl PluginCatalogRpcHandler {
         path: &Path,
         input: String,
         position: Position,
+        trigger_character: Option<String>,
     ) {
         let uri = Url::from_file_path(path).unwrap();
         let method = Completion::METHOD;
+        // Only the servers that list the character in `triggerCharacters` are asked
+        // (→ `PluginHostHandler::request_wanted`)
+        let context =
+            trigger_character.map(|character| lsp_types::CompletionContext {
+                trigger_kind: lsp_types::CompletionTriggerKind::TRIGGER_CHARACTER,
+                trigger_character: Some(character),
+            });
         let params = CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
@@ -1131,7 +1141,7 @@ impl PluginCatalogRpcHandler {
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
-            context: None,
+            context,
         };
 
         let core_rpc = self.core_rpc.clone();

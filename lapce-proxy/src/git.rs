@@ -1,4 +1,4 @@
-//! ソース管理（libgit2）。WASI では `git_wasi.rs` が同じ名前で置き換わる
+//! ソース管理（libgit2）。BrowserOS では `git_cli.rs` が同じ名前で置き換わる
 
 use std::{
     collections::HashSet,
@@ -251,7 +251,10 @@ pub(crate) fn git_diff_new(workspace_path: &Path) -> Option<DiffInfo> {
     })
 }
 
-pub(crate) fn file_get_head(workspace_path: &Path, path: &Path) -> Result<(String, String)> {
+pub(crate) fn file_get_head(
+    workspace_path: &Path,
+    path: &Path,
+) -> Result<(String, String)> {
     let repo = Repository::discover(workspace_path)?;
     let head = repo.head()?;
     let tree = head.peel_to_tree()?;
@@ -264,7 +267,10 @@ pub(crate) fn file_get_head(workspace_path: &Path, path: &Path) -> Result<(Strin
     Ok((id, content))
 }
 
-pub(crate) fn git_get_remote_file_url(workspace_path: &Path, file: &Path) -> Result<String> {
+pub(crate) fn git_get_remote_file_url(
+    workspace_path: &Path,
+    file: &Path,
+) -> Result<String> {
     let repo = Repository::discover(workspace_path)?;
     let head = repo.head()?;
     let target_remote = repo.find_remote(
@@ -308,4 +314,3 @@ pub(crate) fn git_get_remote_file_url(workspace_path: &Path, file: &Path) -> Res
 
     Ok(url)
 }
-

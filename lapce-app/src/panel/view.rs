@@ -30,6 +30,7 @@ use crate::{
     app::{clickable_icon, clickable_icon_base},
     config::{LapceConfig, color::LapceColor, icon::LapceIcons},
     file_explorer::view::file_explorer_panel,
+    i18n,
     panel::{
         call_hierarchy_view::show_hierarchy_panel, document_symbol::symbol_panel,
         implementation_view::implementation_panel,
@@ -544,25 +545,33 @@ fn panel_picker(
     let is_first = position.is_first();
     dyn_stack(
         move || {
-            panel
-                .panels
-                .with(|panels| panels.get(&position).cloned().unwrap_or_default())
+            panel.panels.with(|panels| {
+                panels
+                    .get(&position)
+                    .map(|p| {
+                        p.iter()
+                            .copied()
+                            .filter(PanelKind::is_pickable)
+                            .collect::<im::Vector<_>>()
+                    })
+                    .unwrap_or_default()
+            })
         },
-        |p| *p,
+        |p: &PanelKind| *p,
         move |p| {
             let window_tab_data = window_tab_data.clone();
             let tooltip = match p {
-                PanelKind::Terminal => "Terminal",
-                PanelKind::FileExplorer => "File Explorer",
-                PanelKind::SourceControl => "Source Control",
-                PanelKind::Plugin => "Plugins",
-                PanelKind::Search => "Search",
-                PanelKind::Problem => "Problems",
-                PanelKind::Debug => "Debug",
-                PanelKind::CallHierarchy => "Call Hierarchy",
-                PanelKind::DocumentSymbol => "Document Symbol",
-                PanelKind::References => "References",
-                PanelKind::Implementation => "Implementation",
+                PanelKind::Terminal => i18n::t("Terminal"),
+                PanelKind::FileExplorer => i18n::t("File Explorer"),
+                PanelKind::SourceControl => i18n::t("Source Control"),
+                PanelKind::Plugin => i18n::t("Plugins"),
+                PanelKind::Search => i18n::t("Search"),
+                PanelKind::Problem => i18n::t("Problems"),
+                PanelKind::Debug => i18n::t("Debug"),
+                PanelKind::CallHierarchy => i18n::t("Call Hierarchy"),
+                PanelKind::DocumentSymbol => i18n::t("Document Symbol"),
+                PanelKind::References => i18n::t("References"),
+                PanelKind::Implementation => i18n::t("Implementation"),
             };
             let icon = p.svg_name();
             let is_active = {
@@ -642,7 +651,15 @@ fn panel_picker(
         s.border_color(config.get().color(LapceColor::LAPCE_BORDER))
             .apply_if(
                 panels.with(|p| {
-                    p.get(&position).map(|p| p.is_empty()).unwrap_or(true)
+                    p.get(&position)
+                        // BrowserOS 版では、絵を出す板が 1 つだけなら切り替えるものが無いので並びごと隠す
+                        // （ソース管理を外してファイルの一覧だけにしたとき → lapce_core::embed、
+                        // 絵を出さない板 → PanelKind::is_pickable）
+                        .map(|p| {
+                            p.iter().filter(|kind| kind.is_pickable()).count()
+                                <= usize::from(cfg!(target_vendor = "browseros"))
+                        })
+                        .unwrap_or(true)
                 }),
                 |s| s.hide(),
             )

@@ -26,6 +26,7 @@ use crate::{
     config::{LapceConfig, color::LapceColor, icon::LapceIcons},
     debug::{DapVariable, RunDebugMode, StackTraceData},
     editor::location::{EditorLocation, EditorPosition},
+    i18n,
     listener::Listener,
     settings::checkbox,
     terminal::panel::TerminalPanelData,
@@ -42,23 +43,23 @@ pub fn debug_panel(
 
     PanelBuilder::new(config, position)
         .add_height(
-            "Processes",
+            i18n::t("Processes"),
             150.0,
             debug_processes(terminal.clone(), config),
             window_tab_data.panel.section_open(PanelSection::Process),
         )
         .add(
-            "Variables",
+            i18n::t("Variables"),
             variables_view(window_tab_data.clone()),
             window_tab_data.panel.section_open(PanelSection::Variable),
         )
         .add(
-            "Stack Frames",
+            i18n::t("Stack Frames"),
             debug_stack_traces(terminal.clone(), internal_command, config),
             window_tab_data.panel.section_open(PanelSection::StackFrame),
         )
         .add_height(
-            "Breakpoints",
+            i18n::t("Breakpoints"),
             150.0,
             breakpoints_view(window_tab_data.clone()),
             window_tab_data.panel.section_open(PanelSection::Breakpoint),
@@ -93,7 +94,7 @@ fn debug_process_icons(
                     },
                     || false,
                     || false,
-                    || "Restart",
+                    || i18n::t("Restart"),
                     config,
                 )
                 .style(|s| s.margin_horiz(4.0))
@@ -107,7 +108,7 @@ fn debug_process_icons(
                     },
                     || false,
                     move || stopped,
-                    || "Stop",
+                    || i18n::t("Stop"),
                     config,
                 )
                 .style(|s| s.margin_right(4.0))
@@ -121,7 +122,7 @@ fn debug_process_icons(
                     },
                     || false,
                     || false,
-                    || "Close",
+                    || i18n::t("Close"),
                     config,
                 )
                 .style(|s| s.margin_right(4.0))
@@ -137,7 +138,7 @@ fn debug_process_icons(
                     },
                     || false,
                     move || !paused() || stopped,
-                    || "Continue",
+                    || i18n::t("Continue"),
                     config,
                 )
                 .style(|s| s.margin_horiz(6.0))
@@ -151,7 +152,7 @@ fn debug_process_icons(
                     },
                     || false,
                     move || paused() || stopped,
-                    || "Pause",
+                    || i18n::t("Pause"),
                     config,
                 )
                 .style(|s| s.margin_right(4.0))
@@ -165,7 +166,7 @@ fn debug_process_icons(
                     },
                     || false,
                     move || !paused() || stopped,
-                    || "Step Over",
+                    || i18n::t("Step Over"),
                     config,
                 )
                 .style(|s| s.margin_right(4.0))
@@ -179,7 +180,7 @@ fn debug_process_icons(
                     },
                     || false,
                     move || !paused() || stopped,
-                    || "Step Into",
+                    || i18n::t("Step Into"),
                     config,
                 )
                 .style(|s| s.margin_right(4.0))
@@ -193,7 +194,7 @@ fn debug_process_icons(
                     },
                     || false,
                     move || !paused() || stopped,
-                    || "Step Out",
+                    || i18n::t("Step Out"),
                     config,
                 )
                 .style(|s| s.margin_right(4.0))
@@ -207,7 +208,7 @@ fn debug_process_icons(
                     },
                     || false,
                     || false,
-                    || "Restart",
+                    || i18n::t("Restart"),
                     config,
                 )
                 .style(|s| s.margin_right(4.0))
@@ -221,7 +222,7 @@ fn debug_process_icons(
                     },
                     || false,
                     move || stopped,
-                    || "Stop",
+                    || i18n::t("Stop"),
                     config,
                 )
                 .style(|s| s.margin_right(4.0))
@@ -235,7 +236,7 @@ fn debug_process_icons(
                     },
                     || false,
                     || false,
-                    || "Close",
+                    || i18n::t("Close"),
                     config,
                 )
                 .style(|s| s.margin_right(4.0))
@@ -681,7 +682,7 @@ fn breakpoints_view(window_tab_data: Rc<WindowTabData>) -> impl View {
                             },
                             || false,
                             || false,
-                            || "Remove",
+                            || i18n::t("Remove"),
                             config,
                         )
                         .on_event_stop(EventListener::PointerDown, |_| {}),

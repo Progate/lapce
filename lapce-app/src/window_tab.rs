@@ -10,13 +10,13 @@ use std::{
     time::Instant,
 };
 
-#[cfg(target_os = "wasi")]
-use crate::open_wasi as open;
+#[cfg(target_vendor = "browseros")]
+use crate::open_browseros as open;
 use alacritty_terminal::vte::ansi::Handler;
 use floem::{
     ViewId,
     action::{TimerToken, open_file, remove_overlay},
-    ext_event::{create_ext_action, create_signal_from_channel},
+    ext_event::{ExtSender, create_ext_action, create_ext_channel},
     file::FileDialogOptions,
     keyboard::Modifiers,
     kurbo::Size,
@@ -72,6 +72,7 @@ use crate::{
     find::Find,
     global_search::GlobalSearchData,
     hover::HoverData,
+    i18n,
     id::WindowTabId,
     inline_completion::InlineCompletionData,
     keypress::{EventRef, KeyPressData, KeyPressFocus, condition::Condition},
@@ -145,7 +146,7 @@ pub struct CommonData {
     pub lapce_command: Listener<LapceCommand>,
     pub workbench_command: Listener<LapceWorkbenchCommand>,
     pub term_tx: Sender<(TermId, TermEvent)>,
-    pub term_notification_tx: Sender<TermNotification>,
+    pub term_notification_tx: ExtSender<TermNotification>,
     pub proxy: ProxyRpcHandler,
     pub view_id: RwSignal<ViewId>,
     pub ui_line_height: Memo<f64>,
@@ -320,7 +321,8 @@ impl WindowTabData {
         let proxy_status = cx.create_rw_signal(None);
 
         let (term_tx, term_rx) = channel();
-        let (term_notification_tx, term_notification_rx) = channel();
+        // 端末の知らせは送り手が直接 UI の側を起こす（受け取りを待つだけのスレッドを置かない → floem の create_ext_channel）
+        let (term_notification_tx, term_notification) = create_ext_channel();
         {
             let term_notification_tx = term_notification_tx.clone();
             std::thread::Builder::new()
@@ -394,6 +396,11 @@ impl WindowTabData {
         });
 
         let main_split = MainSplitData::new(cx, common.clone());
+        // Word based suggestions read the open documents, which the main split keeps
+        let docs = main_split.docs;
+        common
+            .completion
+            .update(|completion| completion.set_docs(docs));
         let code_action =
             cx.create_rw_signal(CodeActionData::new(cx, common.clone()));
         let source_control =
@@ -524,7 +531,7 @@ impl WindowTabData {
         );
 
         {
-            let notification = create_signal_from_channel(term_notification_rx);
+            let notification = term_notification;
             let terminal = terminal.clone();
             cx.create_effect(move |_| {
                 notification.with(|notification| {
@@ -736,7 +743,7 @@ impl WindowTabData {
             OpenFolder => {
                 if !self.workspace.kind.is_remote() {
                     let window_command = self.common.window_common.window_command;
-                    let mut options = FileDialogOptions::new().title("Choose a folder").select_directories();
+                    let mut options = FileDialogOptions::new().title(i18n::t("Choose a folder")).select_directories();
                     options = if let Some(parent) = self.workspace.path.as_ref().and_then(|x| x.parent()) {
                         options.force_starting_directory(parent)
                     } else {
@@ -777,7 +784,7 @@ impl WindowTabData {
             OpenFile => {
                 if !self.workspace.kind.is_remote() {
                     let internal_command = self.common.internal_command;
-                    let options = FileDialogOptions::new().title("Choose a file");
+                    let options = FileDialogOptions::new().title(i18n::t("Choose a file"));
                     open_file(options, move |file| {
                         if let Some(mut file) = file {
                             internal_command.send(InternalCommand::OpenFile {
@@ -879,6 +886,22 @@ impl WindowTabData {
                         },
                         None,
                     );
+                }
+            }
+            OpenImagePreview => {
+                // 開いているエディタのファイルの見た目を見る（SVG など。→ image_preview.rs）
+                let path = self.main_split.active_editor.get_untracked().and_then(
+                    |editor| {
+                        editor
+                            .doc()
+                            .content
+                            .with_untracked(|content| content.path().cloned())
+                    },
+                );
+                if let Some(path) =
+                    path.filter(|path| crate::image_preview::can_preview(path))
+                {
+                    self.main_split.open_image_preview(path);
                 }
             }
             OpenLogFile => {
@@ -2006,6 +2029,9 @@ impl WindowTabData {
                 left_path,
                 right_path,
             } => self.main_split.open_diff_files(left_path, right_path),
+            InternalCommand::OpenImagePreview { path } => {
+                self.main_split.open_image_preview(path)
+            }
             InternalCommand::ExecuteProcess { program, arguments } => {
                 let mut cmd = match std::process::Command::new(program)
                     .args(arguments)
